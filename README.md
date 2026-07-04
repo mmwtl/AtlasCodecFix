@@ -8,6 +8,7 @@ task: ADB connection setup, profile selection, manual quick apply, and optional 
 ## Features
 
 - Connects to local ADB over TCP from the device itself.
+- Runs a preflight compatibility check before applying a codec profile.
 - Applies codec/profile/spec configs through a root shell.
 - Supports auto-apply after boot and after app update.
 - Provides a separate quick launcher, `Codec Profiles`, for applying a profile from a small popup.
@@ -32,10 +33,11 @@ When a profile is applied, the app:
 
 1. Copies the required profile files and `codecfix.sh` from app assets.
 2. Opens an ADB shell connection to `localhost:<port>`.
-3. Runs the script through `su root`.
-4. Copies the selected files to `/dev/hevc`.
-5. Bind-mounts codec config files over the target files in `/vendor/etc`.
-6. Restarts media codec services.
+3. Runs `preflight.sh` through `su root`.
+4. Stops if the target is unsupported.
+5. Copies the selected files to `/dev/hevc`.
+6. Bind-mounts codec config files over the target files in `/vendor/etc`.
+7. Restarts media codec services.
 
 The fix is runtime-only because it uses bind mounts. After reboot, Android loses these mounts, so the
 app can re-apply the selected profile automatically if auto-apply is enabled.
@@ -75,6 +77,7 @@ app/src/main/java/com/mmwtl/atlascodecfix/
   AutoApplyReceiver.kt         Boot/package-update auto-apply receiver
 
 hevc/
+  preflight.sh                 Root-side compatibility guard
   codecfix.sh                  Root-side bind-mount script
   default/                     Stock/default source configs
   min/                         Minimal HEVC-enabled profile

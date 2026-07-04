@@ -127,15 +127,35 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun setAutoApply(enabled: Boolean) {
-        appContainer.prefs.autoApply = enabled
-        screenState = screenState.copy(
-            autoApply = enabled,
-            status = if (enabled) {
-                "Автоприменение включено для ${screenState.selectedVariant.title}"
-            } else {
-                "Автоприменение выключено"
+        lifecycleScope.launch {
+            if (enabled) {
+                screenState = screenState.copy(isBusy = true, status = "Проверяю совместимость")
+                val compatibility = withContext(Dispatchers.IO) {
+                    appContainer.codecFixRepository.checkCompatibility()
+                }
+                if (!compatibility.autoApplyAllowed) {
+                    appContainer.prefs.autoApply = false
+                    screenState = screenState.copy(
+                        autoApply = false,
+                        isBusy = false,
+                        status = compatibility.output.trim().takeLast(220)
+                            .ifBlank { "Автоприменение недоступно для этого устройства" }
+                    )
+                    return@launch
+                }
             }
-        )
+
+            appContainer.prefs.autoApply = enabled
+            screenState = screenState.copy(
+                autoApply = enabled,
+                isBusy = false,
+                status = if (enabled) {
+                    "Автоприменение включено для ${screenState.selectedVariant.title}"
+                } else {
+                    "Автоприменение выключено"
+                }
+            )
+        }
     }
 
     private fun refreshCurrentVariant() {

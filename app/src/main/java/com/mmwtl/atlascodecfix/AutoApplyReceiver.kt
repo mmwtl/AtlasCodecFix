@@ -31,7 +31,23 @@ class AutoApplyReceiver : BroadcastReceiver() {
                     return@launch
                 }
 
-                val result = app.codecFixRepository.applyVariant(app.prefs.selectedVariant)
+                val compatibility = app.codecFixRepository.checkCompatibility()
+                if (!compatibility.autoApplyAllowed) {
+                    Log.w(
+                        TAG,
+                        "Auto apply skipped, preflight ${compatibility.status}: " +
+                            compatibility.output.trim().takeLast(180)
+                    )
+                    return@launch
+                }
+
+                val currentVariant = app.codecFixRepository.detectCurrentVariant().variant
+                if (currentVariant == app.prefs.selectedVariant) {
+                    Log.i(TAG, "Auto apply skipped, already ${app.prefs.selectedVariant.argument}")
+                    return@launch
+                }
+
+                val result = app.codecFixRepository.applyVariant(app.prefs.selectedVariant, allowRisky = false)
                 Log.i(TAG, "Auto apply ${app.prefs.selectedVariant.argument}: success=${result.success}")
             } catch (t: Throwable) {
                 Log.e(TAG, "Auto apply failed", t)

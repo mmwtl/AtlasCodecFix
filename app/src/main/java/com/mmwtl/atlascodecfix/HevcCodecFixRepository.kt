@@ -10,6 +10,34 @@ class HevcCodecFixRepository(
     private val context: Context,
     private val adb: AdbClient
 ) {
+    suspend fun checkCompatibility(): HevcCodecFixCompatibilityResult =
+        withContext(Dispatchers.IO) {
+            val output = runCatching {
+                adb.execute(buildPreflightCommand())
+            }.getOrElse { t ->
+                Log.e(TAG, "HEVC preflight failed", t)
+                t.message ?: t.javaClass.simpleName
+            }
+            val commandSuccess = output.isCommandSuccess()
+            val status = if (commandSuccess) {
+                parseCompatibilityStatus(output)
+            } else {
+                HevcCodecFixCompatibilityStatus.UNKNOWN
+            }
+
+            HevcCodecFixCompatibilityResult(
+                status = status,
+                autoApplyAllowed = commandSuccess &&
+                    status == HevcCodecFixCompatibilityStatus.SUPPORTED &&
+                    parseKey(output, "auto_apply").equals("yes", ignoreCase = true),
+                output = output,
+                commandSuccess = commandSuccess,
+                reason = parseKey(output, "reason"),
+                score = parseKey(output, "score")?.toIntOrNull(),
+                variant = detectVariant(output)
+            )
+        }
+
     suspend fun detectCurrentVariant(): HevcCodecFixDetectResult = withContext(Dispatchers.IO) {
         val output = adb.execute(buildDetectCommand())
         HevcCodecFixDetectResult(
@@ -19,10 +47,25 @@ class HevcCodecFixRepository(
         )
     }
 
-    suspend fun applyVariant(variant: HevcCodecFixVariant): HevcCodecFixApplyResult =
+    suspend fun applyVariant(
+        variant: HevcCodecFixVariant,
+        allowRisky: Boolean = true
+    ): HevcCodecFixApplyResult =
         withContext(Dispatchers.IO) {
+            val compatibility = checkCompatibility()
+            if (!compatibility.canApply(allowRisky)) {
+                return@withContext HevcCodecFixApplyResult(
+                    requestedVariant = variant,
+                    detectedVariant = compatibility.variant,
+                    runOutput = compatibility.output,
+                    detectOutput = "",
+                    success = false,
+                    compatibility = compatibility
+                )
+            }
+
             val runOutput = runCatching {
-                val stagingDir = stageHevcAssets(variant)
+                val stagingDir = stageHevcAssets()
                 adb.execute(buildApplyCommand(stagingDir, variant))
             }.getOrElse { t ->
                 Log.e(TAG, "HEVC apply failed", t)
@@ -36,32 +79,22 @@ class HevcCodecFixRepository(
                 detectedVariant = detected.variant,
                 runOutput = runOutput,
                 detectOutput = detected.output,
-                success = success
+                success = success,
+                compatibility = compatibility
             )
         }
 
-    private suspend fun stageHevcAssets(variant: HevcCodecFixVariant): File = withContext(Dispatchers.IO) {
+    private suspend fun stageHevcAssets(): File = withContext(Dispatchers.IO) {
         val target = File(context.noBackupFilesDir, HEVC_DIR_NAME)
         if (target.exists()) {
             target.deleteRecursively()
         }
         target.mkdirs()
 
-        requiredAssetRoots(variant).forEach { assetName ->
+        ASSET_ROOTS.forEach { assetName ->
             copyAssetTree(assetName, File(target, assetName))
         }
         target
-    }
-
-    private fun requiredAssetRoots(variant: HevcCodecFixVariant): List<String> {
-        val variantFolder = when (variant) {
-            HevcCodecFixVariant.MIN -> "min"
-            HevcCodecFixVariant.MAX -> "max"
-            HevcCodecFixVariant.ULTRA -> "ultra"
-            HevcCodecFixVariant.MSMNILE,
-            HevcCodecFixVariant.DIREWOLF -> null
-        }
-        return listOfNotNull(CODEC_FIX_SCRIPT, variantFolder)
     }
 
     private fun copyAssetTree(assetPath: String, target: File) {
@@ -99,6 +132,7 @@ class HevcCodecFixRepository(
             cp -R ${stagingDir.absolutePath.shellQuote()} /dev/hevc
             find /dev/hevc -type d -exec chmod 0755 {} +
             find /dev/hevc -type f -exec chmod 0644 {} +
+            chmod 0755 /dev/hevc/preflight.sh
             chmod 0755 /dev/hevc/codecfix.sh
             cd /dev/hevc
             ./codecfix.sh ${variant.argument}
@@ -107,8 +141,16 @@ class HevcCodecFixRepository(
         return "su root sh -c ${script.shellQuote()}"
     }
 
+    private fun buildPreflightCommand(): String {
+        return "su root sh -c ${readAssetText(PREFLIGHT_ASSET).shellQuote()}"
+    }
+
     private fun buildDetectCommand(): String {
         return "su root sh -c ${DETECT_SCRIPT.shellQuote()}"
+    }
+
+    private fun readAssetText(assetPath: String): String {
+        return context.assets.open(assetPath).bufferedReader().use { it.readText() }
     }
 
     private fun detectVariant(output: String): HevcCodecFixVariant? {
@@ -128,6 +170,18 @@ class HevcCodecFixRepository(
         }
     }
 
+    private fun parseCompatibilityStatus(output: String): HevcCodecFixCompatibilityStatus {
+        return HevcCodecFixCompatibilityStatus.fromValue(parseKey(output, "status"))
+    }
+
+    private fun parseKey(output: String, key: String): String? {
+        return Regex("""(?m)^${Regex.escape(key)}:([^\r\n]*)""")
+            .find(output)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.trim()
+    }
+
     private fun String.isCommandSuccess(): Boolean {
         return !contains("ADB helper disabled", ignoreCase = true) &&
             !contains("ADB disconnected", ignoreCase = true) &&
@@ -141,7 +195,8 @@ class HevcCodecFixRepository(
     private companion object {
         private const val TAG = "AtlasCodecFix"
         private const val HEVC_DIR_NAME = "hevc"
-        private const val CODEC_FIX_SCRIPT = "codecfix.sh"
+        private const val PREFLIGHT_ASSET = "preflight.sh"
+        private val ASSET_ROOTS = listOf(PREFLIGHT_ASSET, "codecfix.sh", "default", "min", "max", "ultra")
         private val DETECT_SCRIPT = """
             TARGET_CODECS="/vendor/etc/media_codecs_msmnile.xml"
             TARGET_PERFORMANCE="/vendor/etc/media_codecs_performance_msmnile.xml"
@@ -149,6 +204,19 @@ class HevcCodecFixRepository(
             TARGET_SPECS="/vendor/etc/video_system_specs.json"
             TARGET_MSMNILE_SPECS="/vendor/etc/media_msmnile/video_system_specs.json"
             BASE_DIR="/dev/hevc"
+
+            for target in \
+                "${'$'}TARGET_CODECS" \
+                "${'$'}TARGET_PERFORMANCE" \
+                "${'$'}TARGET_PROFILES" \
+                "${'$'}TARGET_SPECS" \
+                "${'$'}TARGET_MSMNILE_SPECS"; do
+                if [ ! -f "${'$'}target" ]; then
+                    echo "variant:unknown"
+                    echo "missing:${'$'}target"
+                    exit 0
+                fi
+            done
 
             mounted_targets="${'$'}(mount | grep -E "/vendor/etc/(media_codecs_msmnile.xml|media_codecs_performance_msmnile.xml|media_profiles_msmnile.xml|video_system_specs.json|media_msmnile/video_system_specs.json)" || true)"
             if [ -z "${'$'}mounted_targets" ]; then
@@ -193,6 +261,39 @@ class HevcCodecFixRepository(
     }
 }
 
+enum class HevcCodecFixCompatibilityStatus {
+    SUPPORTED,
+    RISKY,
+    UNSUPPORTED,
+    UNKNOWN;
+
+    companion object {
+        fun fromValue(value: String?): HevcCodecFixCompatibilityStatus {
+            return entries.firstOrNull { it.name.equals(value, ignoreCase = true) }
+                ?: UNKNOWN
+        }
+    }
+}
+
+data class HevcCodecFixCompatibilityResult(
+    val status: HevcCodecFixCompatibilityStatus,
+    val autoApplyAllowed: Boolean,
+    val output: String,
+    val commandSuccess: Boolean,
+    val reason: String?,
+    val score: Int?,
+    val variant: HevcCodecFixVariant?
+) {
+    fun canApply(allowRisky: Boolean): Boolean {
+        return commandSuccess && when (status) {
+            HevcCodecFixCompatibilityStatus.SUPPORTED -> true
+            HevcCodecFixCompatibilityStatus.RISKY -> allowRisky
+            HevcCodecFixCompatibilityStatus.UNSUPPORTED,
+            HevcCodecFixCompatibilityStatus.UNKNOWN -> false
+        }
+    }
+}
+
 data class HevcCodecFixDetectResult(
     val variant: HevcCodecFixVariant?,
     val output: String,
@@ -204,5 +305,6 @@ data class HevcCodecFixApplyResult(
     val detectedVariant: HevcCodecFixVariant?,
     val runOutput: String,
     val detectOutput: String,
-    val success: Boolean
+    val success: Boolean,
+    val compatibility: HevcCodecFixCompatibilityResult? = null
 )

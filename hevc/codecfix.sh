@@ -20,6 +20,32 @@ kill_if_running() {
     fi
 }
 
+guard_supported_target() {
+    if [ -f "$BASE_DIR/preflight.sh" ]; then
+        sh "$BASE_DIR/preflight.sh" --guard || exit 1
+        return
+    fi
+
+    for target in \
+        "$TARGET_CODECS" \
+        "$TARGET_PERFORMANCE" \
+        "$TARGET_PROFILES" \
+        "$TARGET_SPECS" \
+        "$TARGET_MSMNILE_SPECS"; do
+        if [ ! -f "$target" ]; then
+            echo "status:unsupported"
+            echo "reason:missing:$target"
+            exit 1
+        fi
+    done
+
+    if ! grep -Eq "c2\.qti\.hevc|OMX\.qcom\.video\.(encoder|decoder)\.hevc" "$TARGET_CODECS" 2>/dev/null; then
+        echo "status:unsupported"
+        echo "reason:qti_hevc_codec_not_found"
+        exit 1
+    fi
+}
+
 restart_media() {
     kill_if_running media.swcodec
     kill_if_running media.hwcodec
@@ -37,6 +63,8 @@ restore_default() {
 }
 
 apply_direwolf() {
+    guard_supported_target
+
     umount "$TARGET_CODECS" 2>/dev/null
     umount "$TARGET_PERFORMANCE" 2>/dev/null
     umount "$TARGET_PROFILES" 2>/dev/null
@@ -61,6 +89,8 @@ require_config() {
 apply_folder() {
     NAME="$1"
     SRC_DIR="$BASE_DIR/$NAME"
+
+    guard_supported_target
 
     CODECS_SRC="$SRC_DIR/media_codecs_$NAME.xml"
     PERFORMANCE_SRC="$SRC_DIR/media_codecs_performance_$NAME.xml"
