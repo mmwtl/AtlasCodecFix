@@ -1,0 +1,80 @@
+{
+    "Video": {
+        "Features": {
+            "enc_csc_custom_matrix": false,
+            "enc_auto_blur": true,
+            "enc_c2d_rotation": false,
+            "enc_cvp_enable": true,
+            "enc_csc_enable": false,
+            "perf_control_enable": false,
+            "enc_vpss_flip": true,
+            "dec_secure_static_count": false
+        },
+        "Presets": {
+            "dec_sec_prefetch_size_internal": 209715200,
+            "dec_sec_prefetch_size_output": 13434880,
+            "dec_linear_color_format": 0,
+            "enc_default_bframe_count": 1,
+            "enc_adaptive_b_max_mbs_per_sec": 1944000,
+            "enc_adaptive_b_max_mbs_per_frame": 32400,
+            "enc_adaptive_b_max_width": 3840,
+            "enc_hier_b_max_mbs_per_sec": 489600,
+            "enc_hier_b_max_mbs_per_frame": 8160,
+            "enc_hier_b_max_width": 1920,
+            "max_supported_render_rate": 120,
+            "enc_linear_color_format": 0,
+            "enc_chroma_qp_offset_10_bit": 0,
+            "enc_chroma_qp_offset_8_bit": 0,
+            "enc_bitrate_savings": 3,
+            "enc_bitrate_boost": 25,
+            "enc_qp_min": 10,
+            "enc_qp_max": 40,
+            "vt_driver_version": 534123018,
+            "ltr_max_count": 2,
+            "preprocess_max_downscale_factor": 8,
+            "preprocess_rotation": 1,
+            "enc_hier_p_max_temporal_layer_count": 6,
+            "enc_hier_b_max_temporal_layer_count": 4,
+            "enc_max_b_frame_mbs_per_sec": 489600,
+            "max_temporal_layer_pframe_count": 6,
+            "max_temporal_layer_bframe_count": 4,
+            "enc_bitrate_boost_qp_min": 10,
+            "enc_bitrate_boost_qp_max": 40,
+            "pipeline_extra_output_buffers": 2,
+            "max_retry_alloc_output_timeout": 1000
+        },
+        "QC2CodecPlugins": [
+            "libqc2vppfilter.so"
+        ],
+        "codecs-available": {
+            "decoders": [
+                "c2.qti.avc.decoder",
+                "c2.qti.avc.decoder.low_latency",
+                "c2.qti.avc.decoder.secure",
+                "c2.qti.hevc.decoder",
+                "c2.qti.hevc.decoder.low_latency",
+                "c2.qti.hevc.decoder.secure",
+                "c2.qti.vp9.decoder",
+                "c2.qti.vp9.decoder.secure",
+                "c2.qti.mpeg2.decoder",
+                "c2.qti.vp8.decoder",
+                "c2.qti.mpeg2.decoder.secure"
+            ],
+            "encoders": [
+                "c2.qti.avc.encoder",
+                "c2.qti.avc.encoder.secure",
+                "c2.qti.hevc.encoder",
+                "c2.qti.hevc.encoder.cq",
+                "c2.qti.heic.encoder",
+                "c2.qti.vp8.encoder",
+                "c2.qti.hevc.encoder.secure"
+            ]
+        },
+        "filters-available": {
+            "filters": [
+                "c2.qti.vpp.filter",
+                "c2.qti.vpp.filter.secure"
+            ]
+        }
+    }
+}

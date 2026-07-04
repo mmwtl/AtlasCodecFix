@@ -1,0 +1,20 @@
+<resources>
+    <style name="Theme.AtlasCodecFix" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#7893A0</item>
+        <item name="android:navigationBarColor">#111827</item>
+        <item name="android:statusBarColor">#111827</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <style name="Theme.AtlasCodecFix.Popup" parent="Theme.AtlasCodecFix">
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowMinWidthMajor">56%</item>
+        <item name="android:windowMinWidthMinor">88%</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:backgroundDimAmount">0.55</item>
+        <item name="android:windowCloseOnTouchOutside">true</item>
+    </style>
+</resources>
