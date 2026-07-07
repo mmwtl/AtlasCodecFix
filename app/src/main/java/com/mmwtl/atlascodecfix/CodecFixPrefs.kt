@@ -17,6 +17,14 @@ class CodecFixPrefs(context: Context) {
         get() = prefs.getBoolean(KEY_AUTO_APPLY, false)
         set(value) = prefs.edit().putBoolean(KEY_AUTO_APPLY, value).apply()
 
+    var skipCompatibilityCheck: Boolean
+        get() = prefs.getBoolean(KEY_SKIP_COMPATIBILITY_CHECK, false)
+        set(value) = prefs.edit().putBoolean(KEY_SKIP_COMPATIBILITY_CHECK, value).apply()
+
+    var errorNotificationsEnabled: Boolean
+        get() = prefs.getBoolean(KEY_ERROR_NOTIFICATIONS_ENABLED, false)
+        set(value) = prefs.edit().putBoolean(KEY_ERROR_NOTIFICATIONS_ENABLED, value).apply()
+
     var selectedVariant: HevcCodecFixVariant
         get() = HevcCodecFixVariant.fromArgument(prefs.getString(KEY_SELECTED_VARIANT, null))
             ?: HevcCodecFixVariant.DEFAULT
@@ -26,6 +34,8 @@ class CodecFixPrefs(context: Context) {
         private const val KEY_ADB_ENABLED = "adb_enabled"
         private const val KEY_ADB_PORT = "adb_port"
         private const val KEY_AUTO_APPLY = "auto_apply"
+        private const val KEY_SKIP_COMPATIBILITY_CHECK = "skip_compatibility_check"
+        private const val KEY_ERROR_NOTIFICATIONS_ENABLED = "error_notifications_enabled"
         private const val KEY_SELECTED_VARIANT = "selected_variant"
     }
 }

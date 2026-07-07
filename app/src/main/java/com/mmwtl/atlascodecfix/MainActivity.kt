@@ -1,5 +1,10 @@
 package com.mmwtl.atlascodecfix
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.media.MediaCodecInfo
+import android.media.MediaCodecList
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -62,6 +67,8 @@ class MainActivity : ComponentActivity() {
             adbEnabled = prefs.adbEnabled,
             adbPortText = prefs.adbPort.toString(),
             autoApply = prefs.autoApply,
+            skipCompatibilityCheck = prefs.skipCompatibilityCheck,
+            errorNotificationsEnabled = prefs.errorNotificationsEnabled,
             selectedVariant = prefs.selectedVariant
         )
 
@@ -72,7 +79,7 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            MaterialTheme(colorScheme = appColors) {
+            AtlasCodecFixTheme {
                 CodecFixScreen(
                     state = screenState,
                     onAdbEnabledChange = ::setAdbEnabled,
@@ -81,7 +88,14 @@ class MainActivity : ComponentActivity() {
                     onDisconnect = ::disconnectAdb,
                     onVariantSelected = ::selectVariant,
                     onRefresh = ::refreshCurrentVariant,
-                    onAutoApplyChange = ::setAutoApply
+                    onAutoApplyChange = ::setAutoApply,
+                    onSkipCompatibilityCheckChange = ::setSkipCompatibilityCheck,
+                    onLoadCodecs = ::loadAvailableCodecs,
+                    onCodecHardwareChange = ::setCodecHardwareFilter,
+                    onCodecSoftwareChange = ::setCodecSoftwareFilter,
+                    onCodecAudioChange = ::setCodecAudioFilter,
+                    onCodecVideoChange = ::setCodecVideoFilter,
+                    onErrorNotificationsChange = ::setErrorNotificationsEnabled
                 )
             }
         }
@@ -108,8 +122,10 @@ class MainActivity : ComponentActivity() {
     private fun connectAdb() {
         lifecycleScope.launch {
             val connected = withContext(Dispatchers.IO) { appContainer.adbClient.connect() }
+            val status = if (connected) "ADB подключён" else "Не удалось подключиться к ADB"
+            if (!connected) notifyError("ADB подключение", status)
             screenState = screenState.copy(
-                status = if (connected) "ADB подключён" else "Не удалось подключиться к ADB"
+                status = status
             )
         }
     }
@@ -128,18 +144,20 @@ class MainActivity : ComponentActivity() {
 
     private fun setAutoApply(enabled: Boolean) {
         lifecycleScope.launch {
-            if (enabled) {
+            if (enabled && !screenState.skipCompatibilityCheck) {
                 screenState = screenState.copy(isBusy = true, status = "Проверяю совместимость")
                 val compatibility = withContext(Dispatchers.IO) {
                     appContainer.codecFixRepository.checkCompatibility()
                 }
                 if (!compatibility.autoApplyAllowed) {
+                    val status = compatibility.output.trim().takeLast(220)
+                        .ifBlank { "Автоприменение недоступно для этого устройства" }
                     appContainer.prefs.autoApply = false
+                    notifyError("Автоприменение недоступно", status)
                     screenState = screenState.copy(
                         autoApply = false,
                         isBusy = false,
-                        status = compatibility.output.trim().takeLast(220)
-                            .ifBlank { "Автоприменение недоступно для этого устройства" }
+                        status = status
                     )
                     return@launch
                 }
@@ -158,6 +176,38 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun setSkipCompatibilityCheck(enabled: Boolean) {
+        appContainer.prefs.skipCompatibilityCheck = enabled
+        screenState = screenState.copy(
+            skipCompatibilityCheck = enabled,
+            status = if (enabled) {
+                "Проверка совместимости отключена"
+            } else {
+                "Проверка совместимости включена"
+            }
+        )
+    }
+
+    private fun setErrorNotificationsEnabled(enabled: Boolean) {
+        if (enabled &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_POST_NOTIFICATIONS)
+            return
+        }
+
+        appContainer.prefs.errorNotificationsEnabled = enabled
+        screenState = screenState.copy(
+            errorNotificationsEnabled = enabled,
+            status = if (enabled) {
+                "Уведомления об ошибках включены"
+            } else {
+                "Уведомления об ошибках выключены"
+            }
+        )
+    }
+
     private fun refreshCurrentVariant() {
         lifecycleScope.launch {
             screenState = screenState.copy(isBusy = true, status = "Проверяю текущий фикс")
@@ -170,24 +220,157 @@ class MainActivity : ComponentActivity() {
                 status = if (detected.commandSuccess) {
                     "Текущий вариант: ${detected.variant?.title ?: "не определён"}"
                 } else {
-                    detected.output.trim().takeLast(220).ifBlank { "Проверка не выполнена" }
+                    val status = detected.output.trim().takeLast(220).ifBlank { "Проверка не выполнена" }
+                    notifyError("Проверка фикса", status)
+                    status
                 }
             )
         }
     }
 
+    private fun loadAvailableCodecs() {
+        lifecycleScope.launch {
+            screenState = screenState.copy(isCodecListLoading = true, codecListStatus = "Собираю список кодеков")
+            val result = withContext(Dispatchers.Default) {
+                runCatching { collectAvailableCodecs() }
+            }
+            result
+                .onSuccess { codecs ->
+                    screenState = screenState.copy(
+                        codecs = codecs,
+                        isCodecListLoading = false,
+                        codecListStatus = "Найдено кодеков: ${codecs.size}"
+                    )
+                }
+                .onFailure { t ->
+                    val status = t.message ?: t.javaClass.simpleName
+                    notifyError("Список кодеков", status)
+                    screenState = screenState.copy(
+                        isCodecListLoading = false,
+                        codecListStatus = status
+                    )
+                }
+        }
+    }
+
+    private fun setCodecHardwareFilter(enabled: Boolean) {
+        screenState = screenState.copy(showHardwareCodecs = enabled)
+    }
+
+    private fun setCodecSoftwareFilter(enabled: Boolean) {
+        screenState = screenState.copy(showSoftwareCodecs = enabled)
+    }
+
+    private fun setCodecAudioFilter(enabled: Boolean) {
+        screenState = screenState.copy(showAudioCodecs = enabled)
+    }
+
+    private fun setCodecVideoFilter(enabled: Boolean) {
+        screenState = screenState.copy(showVideoCodecs = enabled)
+    }
+
+    private fun collectAvailableCodecs(): List<AvailableCodec> {
+        return MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos
+            .flatMap { info ->
+                val supportedTypes = info.supportedTypes
+                    .map(String::lowercase)
+                    .sorted()
+                listOf(
+                    AvailableCodec(
+                        name = info.name,
+                        supportedTypes = supportedTypes,
+                        isEncoder = info.isEncoder,
+                        acceleration = info.accelerationKind()
+                    )
+                )
+            }
+            .sortedWith(
+                compareBy<AvailableCodec> { it.primaryKind.sortOrder }
+                    .thenBy { it.acceleration.sortOrder }
+                    .thenBy { it.name.lowercase() }
+            )
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQUEST_POST_NOTIFICATIONS) return
+
+        val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+        appContainer.prefs.errorNotificationsEnabled = granted
+        screenState = screenState.copy(
+            errorNotificationsEnabled = granted,
+            status = if (granted) {
+                "Уведомления об ошибках включены"
+            } else {
+                "Разрешение на уведомления не выдано"
+            }
+        )
+    }
+
+    private fun notifyError(title: String, message: String) {
+        appContainer.errorNotifier.notify(title, message)
+    }
+
+    private companion object {
+        private const val REQUEST_POST_NOTIFICATIONS = 100
+    }
 }
 
 private data class CodecFixScreenState(
     val adbEnabled: Boolean = false,
     val adbPortText: String = "5555",
     val autoApply: Boolean = false,
+    val skipCompatibilityCheck: Boolean = false,
+    val errorNotificationsEnabled: Boolean = false,
     val selectedVariant: HevcCodecFixVariant = HevcCodecFixVariant.DEFAULT,
     val currentVariant: HevcCodecFixVariant? = null,
+    val codecs: List<AvailableCodec> = emptyList(),
+    val isCodecListLoading: Boolean = false,
+    val codecListStatus: String? = null,
+    val showHardwareCodecs: Boolean = true,
+    val showSoftwareCodecs: Boolean = true,
+    val showAudioCodecs: Boolean = true,
+    val showVideoCodecs: Boolean = true,
     val connectionState: AdbConnectionState = AdbConnectionState.Disconnected,
     val isBusy: Boolean = false,
     val status: String? = null
 )
+
+private data class AvailableCodec(
+    val name: String,
+    val supportedTypes: List<String>,
+    val isEncoder: Boolean,
+    val acceleration: CodecAcceleration
+) {
+    val primaryKind: CodecMediaKind
+        get() = when {
+            supportedTypes.any { it.startsWith("video/") } -> CodecMediaKind.VIDEO
+            supportedTypes.any { it.startsWith("audio/") } -> CodecMediaKind.AUDIO
+            else -> CodecMediaKind.OTHER
+        }
+}
+
+private enum class CodecAcceleration(
+    val title: String,
+    val sortOrder: Int
+) {
+    HARDWARE("хардовый", 0),
+    SOFTWARE("софтовый", 1),
+    UNKNOWN("неизвестно", 2)
+}
+
+private enum class CodecMediaKind(
+    val title: String,
+    val sortOrder: Int
+) {
+    VIDEO("видео", 0),
+    AUDIO("аудио", 1),
+    OTHER("другое", 2)
+}
 
 @Composable
 private fun CodecFixScreen(
@@ -198,7 +381,14 @@ private fun CodecFixScreen(
     onDisconnect: () -> Unit,
     onVariantSelected: (HevcCodecFixVariant) -> Unit,
     onRefresh: () -> Unit,
-    onAutoApplyChange: (Boolean) -> Unit
+    onAutoApplyChange: (Boolean) -> Unit,
+    onSkipCompatibilityCheckChange: (Boolean) -> Unit,
+    onLoadCodecs: () -> Unit,
+    onCodecHardwareChange: (Boolean) -> Unit,
+    onCodecSoftwareChange: (Boolean) -> Unit,
+    onCodecAudioChange: (Boolean) -> Unit,
+    onCodecVideoChange: (Boolean) -> Unit,
+    onErrorNotificationsChange: (Boolean) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -308,6 +498,55 @@ private fun CodecFixScreen(
                     onCheckedChange = onAutoApplyChange
                 )
             }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Фикс без проверки", fontWeight = FontWeight.Medium)
+                    Text(
+                        text = "Игнорировать preflight и применять профиль напрямую",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                RectSwitch(
+                    checked = state.skipCompatibilityCheck,
+                    enabled = !state.isBusy,
+                    onCheckedChange = onSkipCompatibilityCheckChange
+                )
+            }
+        }
+
+        CodecListSection(
+            state = state,
+            onLoadCodecs = onLoadCodecs,
+            onCodecHardwareChange = onCodecHardwareChange,
+            onCodecSoftwareChange = onCodecSoftwareChange,
+            onCodecAudioChange = onCodecAudioChange,
+            onCodecVideoChange = onCodecVideoChange
+        )
+
+        Section(title = "Ошибки") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Ошибки уведомлениями", fontWeight = FontWeight.Medium)
+                    Text(
+                        text = "Показывать ошибки ADB, preflight и применения",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                RectSwitch(
+                    checked = state.errorNotificationsEnabled,
+                    enabled = !state.isBusy,
+                    onCheckedChange = onErrorNotificationsChange
+                )
+            }
         }
 
         state.status?.takeIf { it.isNotBlank() }?.let { status ->
@@ -351,6 +590,123 @@ private fun StatusHeader(state: CodecFixScreenState) {
                 .background(color)
         )
         Text(text = label, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+@Composable
+private fun CodecListSection(
+    state: CodecFixScreenState,
+    onLoadCodecs: () -> Unit,
+    onCodecHardwareChange: (Boolean) -> Unit,
+    onCodecSoftwareChange: (Boolean) -> Unit,
+    onCodecAudioChange: (Boolean) -> Unit,
+    onCodecVideoChange: (Boolean) -> Unit
+) {
+    val filteredCodecs = state.codecs.filter { codec ->
+        val accelerationVisible = when (codec.acceleration) {
+            CodecAcceleration.HARDWARE -> state.showHardwareCodecs
+            CodecAcceleration.SOFTWARE -> state.showSoftwareCodecs
+            CodecAcceleration.UNKNOWN -> state.showHardwareCodecs && state.showSoftwareCodecs
+        }
+        val audioVisible = state.showAudioCodecs && codec.supportedTypes.any { it.startsWith("audio/") }
+        val videoVisible = state.showVideoCodecs && codec.supportedTypes.any { it.startsWith("video/") }
+        accelerationVisible && (audioVisible || videoVisible)
+    }
+
+    Section(title = "Доступные кодеки") {
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !state.isCodecListLoading,
+            shape = RoundedCornerShape(8.dp),
+            onClick = onLoadCodecs
+        ) {
+            Text(if (state.isCodecListLoading) "Собираю список" else "Посмотреть кодеки")
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            FilterSwitchRow(
+                title = "Хардовые",
+                checked = state.showHardwareCodecs,
+                onCheckedChange = onCodecHardwareChange
+            )
+            FilterSwitchRow(
+                title = "Софтовые",
+                checked = state.showSoftwareCodecs,
+                onCheckedChange = onCodecSoftwareChange
+            )
+            FilterSwitchRow(
+                title = "Видео",
+                checked = state.showVideoCodecs,
+                onCheckedChange = onCodecVideoChange
+            )
+            FilterSwitchRow(
+                title = "Аудио",
+                checked = state.showAudioCodecs,
+                onCheckedChange = onCodecAudioChange
+            )
+        }
+
+        state.codecListStatus?.takeIf { it.isNotBlank() }?.let { status ->
+            Text(
+                text = "$status. Показано: ${filteredCodecs.size}",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        filteredCodecs.forEach { codec ->
+            CodecRow(codec)
+        }
+    }
+}
+
+@Composable
+private fun FilterSwitchRow(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, fontWeight = FontWeight.Medium)
+        RectSwitch(
+            checked = checked,
+            enabled = true,
+            onCheckedChange = onCheckedChange
+        )
+    }
+}
+
+@Composable
+private fun CodecRow(codec: AvailableCodec) {
+    val role = if (codec.isEncoder) "encoder" else "decoder"
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = codec.name,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = "${codec.primaryKind.title} / ${codec.acceleration.title} / $role",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp
+            )
+            Text(
+                text = codec.supportedTypes.joinToString(", "),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp
+            )
+        }
     }
 }
 
@@ -458,3 +814,27 @@ val appColors = darkColorScheme(
     onSurfaceVariant = Color(0xFFD4D4D4),
     outline = Color(0xFF737373)
 )
+
+private fun MediaCodecInfo.accelerationKind(): CodecAcceleration {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        return when {
+            isHardwareAccelerated -> CodecAcceleration.HARDWARE
+            isSoftwareOnly -> CodecAcceleration.SOFTWARE
+            else -> CodecAcceleration.UNKNOWN
+        }
+    }
+
+    val lowerName = name.lowercase()
+    return when {
+        lowerName.startsWith("omx.google.") ||
+            lowerName.startsWith("c2.android.") ||
+            lowerName.startsWith("c2.google.") ||
+            lowerName.startsWith("omx.ffmpeg.") -> CodecAcceleration.SOFTWARE
+        lowerName.contains("qcom") ||
+            lowerName.contains("qti") ||
+            lowerName.contains("mtk") ||
+            lowerName.contains("exynos") ||
+            lowerName.contains("hisi") -> CodecAcceleration.HARDWARE
+        else -> CodecAcceleration.UNKNOWN
+    }
+}

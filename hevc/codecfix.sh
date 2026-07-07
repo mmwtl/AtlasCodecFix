@@ -21,6 +21,12 @@ kill_if_running() {
 }
 
 guard_supported_target() {
+    if [ "$SKIP_PREFLIGHT" = "1" ]; then
+        echo "status:skipped"
+        echo "reason:skip_preflight"
+        return
+    fi
+
     if [ -f "$BASE_DIR/preflight.sh" ]; then
         sh "$BASE_DIR/preflight.sh" --guard || exit 1
         return

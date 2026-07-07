@@ -7,12 +7,14 @@ import com.tananaev.adblib.AdbConnection
 import com.tananaev.adblib.AdbCrypto
 import com.tananaev.adblib.AdbStream
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -75,7 +77,10 @@ class AdbClient(
         }
     }
 
-    suspend fun execute(command: String): String = withContext(Dispatchers.IO) {
+    suspend fun execute(
+        command: String,
+        timeoutMs: Long = COMMAND_TIMEOUT_MS
+    ): String = withContext(Dispatchers.IO) {
         if (!prefs.adbEnabled) {
             closeAsDisconnected()
             return@withContext "ADB helper disabled"
@@ -89,10 +94,17 @@ class AdbClient(
         if (command.isBlank()) return@withContext "empty command"
 
         try {
-            executeLocked(command)
+            withTimeout(timeoutMs) {
+                executeLocked(command)
+            }
         } catch (t: CommandFailedException) {
             Log.w(TAG, "ADB command failed: exit=${t.exitCode}, output=${t.output.takeLast(300)}", t)
             "ADB command failed (exit=${t.exitCode})\n${t.output}"
+        } catch (t: TimeoutCancellationException) {
+            val message = "ADB command timed out after ${timeoutMs / 1000}s"
+            Log.w(TAG, message, t)
+            dropConnection(message)
+            message
         } catch (t: Throwable) {
             Log.w(TAG, "ADB execute failed", t)
             val message = t.message ?: "ADB execute error"
@@ -199,6 +211,7 @@ class AdbClient(
     private companion object {
         private const val TAG = "AtlasCodecFixAdb"
         private const val TIMEOUT_MS = 5_000
+        private const val COMMAND_TIMEOUT_MS = 45_000L
         private const val DONE_PREFIX = "__ADB_DONE__:"
     }
 }

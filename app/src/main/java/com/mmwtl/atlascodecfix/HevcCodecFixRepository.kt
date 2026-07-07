@@ -13,7 +13,7 @@ class HevcCodecFixRepository(
     suspend fun checkCompatibility(): HevcCodecFixCompatibilityResult =
         withContext(Dispatchers.IO) {
             val output = runCatching {
-                adb.execute(buildPreflightCommand())
+                adb.execute(buildPreflightCommand(), PREFLIGHT_TIMEOUT_MS)
             }.getOrElse { t ->
                 Log.e(TAG, "HEVC preflight failed", t)
                 t.message ?: t.javaClass.simpleName
@@ -39,7 +39,7 @@ class HevcCodecFixRepository(
         }
 
     suspend fun detectCurrentVariant(): HevcCodecFixDetectResult = withContext(Dispatchers.IO) {
-        val output = adb.execute(buildDetectCommand())
+        val output = adb.execute(buildDetectCommand(), DETECT_TIMEOUT_MS)
         HevcCodecFixDetectResult(
             variant = detectVariant(output),
             output = output,
@@ -49,24 +49,31 @@ class HevcCodecFixRepository(
 
     suspend fun applyVariant(
         variant: HevcCodecFixVariant,
-        allowRisky: Boolean = true
+        allowRisky: Boolean = true,
+        skipCompatibilityCheck: Boolean = false
     ): HevcCodecFixApplyResult =
         withContext(Dispatchers.IO) {
-            val compatibility = checkCompatibility()
-            if (!compatibility.canApply(allowRisky)) {
-                return@withContext HevcCodecFixApplyResult(
-                    requestedVariant = variant,
-                    detectedVariant = compatibility.variant,
-                    runOutput = compatibility.output,
-                    detectOutput = "",
-                    success = false,
-                    compatibility = compatibility
-                )
+            val compatibility = if (skipCompatibilityCheck) {
+                null
+            } else {
+                checkCompatibility()
+            }
+            if (compatibility != null) {
+                if (!compatibility.canApply(allowRisky)) {
+                    return@withContext HevcCodecFixApplyResult(
+                        requestedVariant = variant,
+                        detectedVariant = compatibility.variant,
+                        runOutput = compatibility.output,
+                        detectOutput = "",
+                        success = false,
+                        compatibility = compatibility
+                    )
+                }
             }
 
             val runOutput = runCatching {
                 val stagingDir = stageHevcAssets()
-                adb.execute(buildApplyCommand(stagingDir, variant))
+                adb.execute(buildApplyCommand(stagingDir, variant, skipCompatibilityCheck), APPLY_TIMEOUT_MS)
             }.getOrElse { t ->
                 Log.e(TAG, "HEVC apply failed", t)
                 t.message ?: t.javaClass.simpleName
@@ -116,7 +123,12 @@ class HevcCodecFixRepository(
         }
     }
 
-    private fun buildApplyCommand(stagingDir: File, variant: HevcCodecFixVariant): String {
+    private fun buildApplyCommand(
+        stagingDir: File,
+        variant: HevcCodecFixVariant,
+        skipCompatibilityCheck: Boolean
+    ): String {
+        val skipPrefix = if (skipCompatibilityCheck) "SKIP_PREFLIGHT=1 " else ""
         val script = """
             set -e
             for target in \
@@ -135,7 +147,7 @@ class HevcCodecFixRepository(
             chmod 0755 /dev/hevc/preflight.sh
             chmod 0755 /dev/hevc/codecfix.sh
             cd /dev/hevc
-            ./codecfix.sh ${variant.argument}
+            ${skipPrefix}./codecfix.sh ${variant.argument}
         """.trimIndent()
 
         return "su root sh -c ${script.shellQuote()}"
@@ -187,6 +199,7 @@ class HevcCodecFixRepository(
             !contains("ADB disconnected", ignoreCase = true) &&
             !contains("ADB connect failed", ignoreCase = true) &&
             !contains("ADB command failed", ignoreCase = true) &&
+            !contains("ADB command timed out", ignoreCase = true) &&
             !contains("ADB execute error", ignoreCase = true)
     }
 
@@ -196,6 +209,9 @@ class HevcCodecFixRepository(
         private const val TAG = "AtlasCodecFix"
         private const val HEVC_DIR_NAME = "hevc"
         private const val PREFLIGHT_ASSET = "preflight.sh"
+        private const val PREFLIGHT_TIMEOUT_MS = 12_000L
+        private const val DETECT_TIMEOUT_MS = 12_000L
+        private const val APPLY_TIMEOUT_MS = 60_000L
         private val ASSET_ROOTS = listOf(PREFLIGHT_ASSET, "codecfix.sh", "default", "min", "max", "ultra")
         private val DETECT_SCRIPT = """
             TARGET_CODECS="/vendor/etc/media_codecs_msmnile.xml"

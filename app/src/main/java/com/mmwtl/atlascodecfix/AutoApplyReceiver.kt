@@ -27,18 +27,25 @@ class AutoApplyReceiver : BroadcastReceiver() {
 
                 val connected = app.adbClient.connect()
                 if (!connected) {
-                    Log.w(TAG, "Auto apply skipped: ADB connect failed")
+                    val message = "Auto apply skipped: ADB connect failed"
+                    Log.w(TAG, message)
+                    app.errorNotifier.notify("Atlas Codec Fix", message)
                     return@launch
                 }
 
-                val compatibility = app.codecFixRepository.checkCompatibility()
-                if (!compatibility.autoApplyAllowed) {
-                    Log.w(
-                        TAG,
-                        "Auto apply skipped, preflight ${compatibility.status}: " +
+                val skipCompatibilityCheck = app.prefs.skipCompatibilityCheck
+                if (!skipCompatibilityCheck) {
+                    val compatibility = app.codecFixRepository.checkCompatibility()
+                    if (!compatibility.autoApplyAllowed) {
+                        val message = "Auto apply skipped, preflight ${compatibility.status}: " +
                             compatibility.output.trim().takeLast(180)
-                    )
-                    return@launch
+                        Log.w(
+                            TAG,
+                            message
+                        )
+                        app.errorNotifier.notify("Atlas Codec Fix", message)
+                        return@launch
+                    }
                 }
 
                 val currentVariant = app.codecFixRepository.detectCurrentVariant().variant
@@ -47,10 +54,25 @@ class AutoApplyReceiver : BroadcastReceiver() {
                     return@launch
                 }
 
-                val result = app.codecFixRepository.applyVariant(app.prefs.selectedVariant, allowRisky = false)
+                val result = app.codecFixRepository.applyVariant(
+                    variant = app.prefs.selectedVariant,
+                    allowRisky = false,
+                    skipCompatibilityCheck = skipCompatibilityCheck
+                )
                 Log.i(TAG, "Auto apply ${app.prefs.selectedVariant.argument}: success=${result.success}")
+                if (!result.success) {
+                    app.errorNotifier.notify(
+                        "Atlas Codec Fix",
+                        listOf(result.runOutput, result.detectOutput)
+                            .joinToString("\n")
+                            .trim()
+                            .takeLast(180)
+                            .ifBlank { "Auto apply failed for ${app.prefs.selectedVariant.argument}" }
+                    )
+                }
             } catch (t: Throwable) {
                 Log.e(TAG, "Auto apply failed", t)
+                app.errorNotifier.notify("Atlas Codec Fix", t.message ?: t.javaClass.simpleName)
             } finally {
                 pendingResult.finish()
             }

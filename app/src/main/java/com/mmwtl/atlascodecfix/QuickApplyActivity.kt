@@ -47,7 +47,7 @@ class QuickApplyActivity : ComponentActivity() {
         screenState = screenState.copy(selectedVariant = appContainer.prefs.selectedVariant)
 
         setContent {
-            MaterialTheme(colorScheme = appColors) {
+            AtlasCodecFixTheme {
                 QuickApplyScreen(
                     state = screenState,
                     onDismiss = ::finish,
@@ -62,9 +62,11 @@ class QuickApplyActivity : ComponentActivity() {
     private fun refreshCurrentVariant() {
         lifecycleScope.launch {
             if (!appContainer.prefs.adbEnabled) {
+                val status = "ADB выключен. Включите его в основном приложении."
+                notifyError("ADB выключен", status)
                 screenState = screenState.copy(
                     isBusy = false,
-                    status = "ADB выключен. Включите его в основном приложении."
+                    status = status
                 )
                 return@launch
             }
@@ -79,7 +81,9 @@ class QuickApplyActivity : ComponentActivity() {
                 status = if (detected.commandSuccess) {
                     null
                 } else {
-                    detected.output.trim().takeLast(220).ifBlank { "Проверка не выполнена" }
+                    val status = detected.output.trim().takeLast(220).ifBlank { "Проверка не выполнена" }
+                    notifyError("Проверка профиля", status)
+                    status
                 }
             )
         }
@@ -88,7 +92,9 @@ class QuickApplyActivity : ComponentActivity() {
     private fun applyVariant(variant: HevcCodecFixVariant) {
         lifecycleScope.launch {
             if (!appContainer.prefs.adbEnabled) {
-                screenState = screenState.copy(status = "ADB выключен. Включите его в основном приложении.")
+                val status = "ADB выключен. Включите его в основном приложении."
+                notifyError("ADB выключен", status)
+                screenState = screenState.copy(status = status)
                 return@launch
             }
 
@@ -100,7 +106,10 @@ class QuickApplyActivity : ComponentActivity() {
             appContainer.prefs.selectedVariant = variant
 
             val result = withContext(Dispatchers.IO) {
-                appContainer.codecFixRepository.applyVariant(variant)
+                appContainer.codecFixRepository.applyVariant(
+                    variant = variant,
+                    skipCompatibilityCheck = appContainer.prefs.skipCompatibilityCheck
+                )
             }
 
             screenState = screenState.copy(
@@ -109,14 +118,20 @@ class QuickApplyActivity : ComponentActivity() {
                 status = if (result.success) {
                     "Применено: ${variant.title}"
                 } else {
-                    listOf(result.runOutput, result.detectOutput)
+                    val status = listOf(result.runOutput, result.detectOutput)
                         .joinToString("\n")
                         .trim()
                         .takeLast(260)
                         .ifBlank { "Не удалось применить профиль" }
+                    notifyError("Не удалось применить ${variant.title}", status)
+                    status
                 }
             )
         }
+    }
+
+    private fun notifyError(title: String, message: String) {
+        appContainer.errorNotifier.notify(title, message)
     }
 }
 

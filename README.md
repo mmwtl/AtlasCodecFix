@@ -9,8 +9,11 @@ task: ADB connection setup, profile selection, manual quick apply, and optional 
 
 - Connects to local ADB over TCP from the device itself.
 - Runs a preflight compatibility check before applying a codec profile.
+- Allows bypassing the preflight compatibility check when manual override is enabled.
 - Applies codec/profile/spec configs through a root shell.
+- Shows the current Android codec list with hardware/software and audio/video filters.
 - Supports auto-apply after boot and after app update.
+- Can show ADB/preflight/apply errors as Android notifications.
 - Provides a separate quick launcher, `Codec Profiles`, for applying a profile from a small popup.
 - Keeps the main app focused on ADB settings and auto-apply configuration.
 
@@ -33,8 +36,8 @@ When a profile is applied, the app:
 
 1. Copies the required profile files and `codecfix.sh` from app assets.
 2. Opens an ADB shell connection to `localhost:<port>`.
-3. Runs `preflight.sh` through `su root`.
-4. Stops if the target is unsupported.
+3. Runs `preflight.sh` through `su root`, unless `Фикс без проверки` is enabled.
+4. Stops if the target is unsupported and the check is not bypassed.
 5. Copies the selected files to `/dev/hevc`.
 6. Bind-mounts codec config files over the target files in `/vendor/etc`.
 7. Restarts media codec services.
@@ -61,6 +64,9 @@ the profile is restored or the device is rebooted.
 5. Tap `Подключить`.
 6. Select the profile for auto-apply.
 7. Enable `Применять после загрузки` if the fix should be restored automatically after boot.
+8. Tap `Посмотреть кодеки` to rebuild and view the current codec list.
+9. Enable `Фикс без проверки` only if the compatibility guard blocks a known-good target.
+10. Enable `Ошибки уведомлениями` if errors should also appear as Android notifications.
 
 For one-off manual activation, open the separate launcher entry `Codec Profiles` and choose the
 profile to apply. Tapping outside the popup closes it.
@@ -131,6 +137,7 @@ apksigner verify --verbose --print-certs app/build/outputs/apk/release/*.apk
 - It bind-mounts files over `/vendor/etc` media codec configs.
 - The fix is not persistent by itself; rebooting clears the bind mounts.
 - Use `Default` or reboot the device to return to the stock runtime state.
+- `Фикс без проверки` bypasses the compatibility guard and can apply the fix to unsupported targets.
 
 ## License
 
