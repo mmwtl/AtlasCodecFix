@@ -1,0 +1,2 @@
+# Bind only the file that differs from the stock msmnile profile.
+codecs=media_codecs_min.xml

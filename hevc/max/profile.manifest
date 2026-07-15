@@ -1,0 +1,5 @@
+# Experimental cross-device aggregate profile.
+codecs=media_codecs_max.xml
+performance=media_codecs_performance_max.xml
+profiles=media_profiles_max.xml
+specs=video_system_specs_max.json

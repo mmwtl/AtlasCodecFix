@@ -15,7 +15,7 @@ class CodecFixApp : Application() {
     override fun onCreate() {
         super.onCreate()
         prefs = CodecFixPrefs(this)
-        adbClient = AdbClient(prefs)
+        adbClient = AdbClient(this, prefs)
         codecFixRepository = HevcCodecFixRepository(this, adbClient)
         errorNotifier = ErrorNotifier(this, prefs)
     }

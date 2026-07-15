@@ -2,125 +2,183 @@ package com.mmwtl.atlascodecfix
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
-class HevcCodecFixRepository(
-    private val context: Context,
-    private val adb: AdbClient
+class HevcCodecFixRepository internal constructor(
+    private val assets: HevcAssetSource,
+    private val adb: AdbCommandExecutor
 ) {
+    constructor(context: Context, adb: AdbCommandExecutor) : this(AndroidHevcAssetSource(context), adb)
+
     suspend fun checkCompatibility(): HevcCodecFixCompatibilityResult =
         withContext(Dispatchers.IO) {
-            val output = runCatching {
-                adb.execute(buildPreflightCommand(), PREFLIGHT_TIMEOUT_MS)
-            }.getOrElse { t ->
-                Log.e(TAG, "HEVC preflight failed", t)
-                t.message ?: t.javaClass.simpleName
-            }
-            val commandSuccess = output.isCommandSuccess()
-            val status = if (commandSuccess) {
-                parseCompatibilityStatus(output)
-            } else {
-                HevcCodecFixCompatibilityStatus.UNKNOWN
-            }
-
-            HevcCodecFixCompatibilityResult(
-                status = status,
-                autoApplyAllowed = commandSuccess &&
-                    status == HevcCodecFixCompatibilityStatus.SUPPORTED &&
-                    parseKey(output, "auto_apply").equals("yes", ignoreCase = true),
-                output = output,
-                commandSuccess = commandSuccess,
-                reason = parseKey(output, "reason"),
-                score = parseKey(output, "score")?.toIntOrNull(),
-                variant = detectVariant(output)
-            )
+            operationMutex.withLock { checkCompatibilityLocked() }
         }
 
     suspend fun detectCurrentVariant(): HevcCodecFixDetectResult = withContext(Dispatchers.IO) {
-        val output = adb.execute(buildDetectCommand(), DETECT_TIMEOUT_MS)
-        HevcCodecFixDetectResult(
-            variant = detectVariant(output),
+        operationMutex.withLock { detectCurrentVariantLocked() }
+    }
+
+    suspend fun collectDiagnostics(): HevcCodecFixDiagnosticResult = withContext(Dispatchers.IO) {
+        operationMutex.withLock {
+            val commandResult = executeCatching(buildDiagnosticsCommand(), DIAGNOSTICS_TIMEOUT_MS)
+            val output = commandResult.displayOutput
+            HevcCodecFixDiagnosticResult(
+                output = output,
+                commandSuccess = commandResult.succeeded,
+                variant = if (commandResult.succeeded) detectVariant(output) else null
+            )
+        }
+    }
+
+    private suspend fun checkCompatibilityLocked(): HevcCodecFixCompatibilityResult {
+        val commandResult = executeCatching(buildPreflightCommand(), PREFLIGHT_TIMEOUT_MS)
+        val output = commandResult.displayOutput
+        val commandSuccess = commandResult.succeeded
+        val status = if (commandSuccess) {
+            parseCompatibilityStatus(output)
+        } else {
+            HevcCodecFixCompatibilityStatus.UNKNOWN
+        }
+
+        return HevcCodecFixCompatibilityResult(
+            status = status,
+            autoApplyAllowed = commandSuccess &&
+                status == HevcCodecFixCompatibilityStatus.SUPPORTED &&
+                parseKey(output, "auto_apply").equals("yes", ignoreCase = true),
             output = output,
-            commandSuccess = output.isCommandSuccess()
+            commandSuccess = commandSuccess,
+            reason = parseKey(output, "reason"),
+            score = parseKey(output, "score")?.toIntOrNull(),
+            variant = parseReportedVariant(output)
+        )
+    }
+
+    private suspend fun detectCurrentVariantLocked(): HevcCodecFixDetectResult {
+        val commandResult = executeCatching(buildDetectCommand(), DETECT_TIMEOUT_MS)
+        val output = commandResult.displayOutput
+        return HevcCodecFixDetectResult(
+            variant = if (commandResult.succeeded) detectVariant(output) else null,
+            output = output,
+            commandSuccess = commandResult.succeeded
         )
     }
 
     suspend fun applyVariant(
         variant: HevcCodecFixVariant,
-        allowRisky: Boolean = true,
-        skipCompatibilityCheck: Boolean = false
+        allowRisky: Boolean = false,
+        skipCompatibilityCheck: Boolean = false,
+        allowExperimental: Boolean = false,
+        requireAutoApplyAllowed: Boolean = false
     ): HevcCodecFixApplyResult =
         withContext(Dispatchers.IO) {
-            val compatibility = if (skipCompatibilityCheck) {
-                null
-            } else {
-                checkCompatibility()
-            }
-            if (compatibility != null) {
-                if (!compatibility.canApply(allowRisky)) {
-                    return@withContext HevcCodecFixApplyResult(
+            operationMutex.withLock {
+                if (variant == HevcCodecFixVariant.MSMNILE) {
+                    return@withLock restoreDefaultLocked()
+                }
+
+                if (variant.experimental && !allowExperimental && !skipCompatibilityCheck) {
+                    return@withLock failedApply(
+                        variant,
+                        contextText(R.string.experimental_confirmation_required, variant.title)
+                    )
+                }
+
+                val compatibility = if (skipCompatibilityCheck) {
+                    null
+                } else {
+                    checkCompatibilityLocked()
+                }
+                val compatibilityAllowed = compatibility == null || if (requireAutoApplyAllowed) {
+                    compatibility.autoApplyAllowed
+                } else {
+                    compatibility.canApply(allowRisky)
+                }
+                if (!compatibilityAllowed) {
+                    return@withLock HevcCodecFixApplyResult(
                         requestedVariant = variant,
                         detectedVariant = compatibility.variant,
                         runOutput = compatibility.output,
                         detectOutput = "",
                         success = false,
-                        compatibility = compatibility
+                        compatibility = compatibility,
+                        retryable = !compatibility.commandSuccess
                     )
                 }
+
+                val runResult = runCatching {
+                    val stagingDir = assets.stage(variant)
+                    adb.execute(buildApplyCommand(stagingDir, variant, skipCompatibilityCheck), APPLY_TIMEOUT_MS)
+                }.getOrElse { t ->
+                    if (t is CancellationException) throw t
+                    Log.e(TAG, "HEVC apply failed", t)
+                    AdbCommandResult.failure(
+                        AdbCommandFailureKind.TRANSPORT,
+                        t.message ?: t.javaClass.simpleName
+                    )
+                }
+
+                val detected = detectCurrentVariantLocked()
+                val success = detected.variant == variant && runResult.succeeded
+                if (!success) {
+                    val recovery = restoreDefaultLocked()
+                    return@withLock HevcCodecFixApplyResult(
+                        requestedVariant = variant,
+                        detectedVariant = recovery.detectedVariant,
+                        runOutput = runResult.displayOutput,
+                        detectOutput = detected.output,
+                        success = false,
+                        compatibility = compatibility,
+                        retryable = runResult.failure != null ||
+                            !detected.commandSuccess ||
+                            !recovery.success,
+                        recoveryOutput = listOf(recovery.runOutput, recovery.detectOutput)
+                            .filter(String::isNotBlank)
+                            .joinToString("\n"),
+                        restoredToDefault = recovery.success
+                    )
+                }
+                HevcCodecFixApplyResult(
+                    requestedVariant = variant,
+                    detectedVariant = detected.variant,
+                    runOutput = runResult.displayOutput,
+                    detectOutput = detected.output,
+                    success = success,
+                    compatibility = compatibility,
+                    retryable = runResult.failure != null || !detected.commandSuccess
+                )
             }
-
-            val runOutput = runCatching {
-                val stagingDir = stageHevcAssets()
-                adb.execute(buildApplyCommand(stagingDir, variant, skipCompatibilityCheck), APPLY_TIMEOUT_MS)
-            }.getOrElse { t ->
-                Log.e(TAG, "HEVC apply failed", t)
-                t.message ?: t.javaClass.simpleName
-            }
-
-            val detected = detectCurrentVariant()
-            val success = detected.variant == variant && runOutput.isCommandSuccess()
-            HevcCodecFixApplyResult(
-                requestedVariant = variant,
-                detectedVariant = detected.variant,
-                runOutput = runOutput,
-                detectOutput = detected.output,
-                success = success,
-                compatibility = compatibility
-            )
         }
 
-    private suspend fun stageHevcAssets(): File = withContext(Dispatchers.IO) {
-        val target = File(context.noBackupFilesDir, HEVC_DIR_NAME)
-        if (target.exists()) {
-            target.deleteRecursively()
-        }
-        target.mkdirs()
-
-        ASSET_ROOTS.forEach { assetName ->
-            copyAssetTree(assetName, File(target, assetName))
-        }
-        target
+    private suspend fun restoreDefaultLocked(): HevcCodecFixApplyResult {
+        val runResult = executeCatching(buildRestoreCommand(), APPLY_TIMEOUT_MS)
+        val detected = detectCurrentVariantLocked()
+        return HevcCodecFixApplyResult(
+            requestedVariant = HevcCodecFixVariant.MSMNILE,
+            detectedVariant = detected.variant,
+            runOutput = runResult.displayOutput,
+            detectOutput = detected.output,
+            success = runResult.succeeded && detected.variant == HevcCodecFixVariant.MSMNILE,
+            retryable = runResult.failure != null || !detected.commandSuccess
+        )
     }
 
-    private fun copyAssetTree(assetPath: String, target: File) {
-        val name = assetPath.substringAfterLast('/')
-        if (name.startsWith(".") || name == "__MACOSX") return
-
-        val children = context.assets.list(assetPath).orEmpty()
-        if (children.isNotEmpty()) {
-            target.mkdirs()
-            children.forEach { child ->
-                copyAssetTree("$assetPath/$child", File(target, child))
-            }
-            return
-        }
-
-        target.parentFile?.mkdirs()
-        context.assets.open(assetPath).use { input ->
-            target.outputStream().use { output -> input.copyTo(output) }
-        }
+    private fun failedApply(
+        variant: HevcCodecFixVariant,
+        message: String
+    ): HevcCodecFixApplyResult {
+        return HevcCodecFixApplyResult(
+            requestedVariant = variant,
+            detectedVariant = null,
+            runOutput = message,
+            detectOutput = "",
+            success = false
+        )
     }
 
     private fun buildApplyCommand(
@@ -128,26 +186,74 @@ class HevcCodecFixRepository(
         variant: HevcCodecFixVariant,
         skipCompatibilityCheck: Boolean
     ): String {
-        val skipPrefix = if (skipCompatibilityCheck) "SKIP_PREFLIGHT=1 " else ""
+        val preflightPrefix = if (skipCompatibilityCheck) {
+            "SKIP_PREFLIGHT=1 "
+        } else {
+            "PREFLIGHT_VERIFIED=1 "
+        }
         val script = """
             set -e
-            for target in \
-                /vendor/etc/media_codecs_msmnile.xml \
-                /vendor/etc/media_codecs_performance_msmnile.xml \
-                /vendor/etc/media_profiles_msmnile.xml \
-                /vendor/etc/video_system_specs.json \
-                /vendor/etc/media_msmnile/video_system_specs.json; do
-                umount "${'$'}target" 2>/dev/null || true
-            done
-            rm -rf /dev/hevc
-            mkdir -p /dev
-            cp -R ${stagingDir.absolutePath.shellQuote()} /dev/hevc
-            find /dev/hevc -type d -exec chmod 0755 {} +
-            find /dev/hevc -type f -exec chmod 0644 {} +
+            NEW_DIR="/dev/hevc.new.${'$'}${'$'}"
+            OLD_DIR="/dev/hevc.old.${'$'}${'$'}"
+            OLD_MOVED=0
+            SWAPPED=0
+
+            cleanup_stage() {
+                status="${'$'}?"
+                trap - 0 HUP INT TERM
+                rm -rf "${'$'}NEW_DIR"
+                if [ "${'$'}status" -ne 0 ]; then
+                    if [ "${'$'}SWAPPED" = "1" ]; then
+                        rm -rf /dev/hevc
+                    fi
+                    if [ "${'$'}OLD_MOVED" = "1" ] && [ -e "${'$'}OLD_DIR" ]; then
+                        rm -rf /dev/hevc
+                        mv "${'$'}OLD_DIR" /dev/hevc
+                    fi
+                else
+                    rm -rf "${'$'}OLD_DIR"
+                fi
+                exit "${'$'}status"
+            }
+
+            trap cleanup_stage 0
+            trap 'exit 129' HUP
+            trap 'exit 130' INT
+            trap 'exit 143' TERM
+            rm -rf "${'$'}NEW_DIR" "${'$'}OLD_DIR"
+            cp -R ${stagingDir.absolutePath.shellQuote()} "${'$'}NEW_DIR"
+            find "${'$'}NEW_DIR" -type d -exec chmod 0755 {} +
+            find "${'$'}NEW_DIR" -type f -exec chmod 0644 {} +
+            chmod 0755 "${'$'}NEW_DIR/preflight.sh"
+            chmod 0755 "${'$'}NEW_DIR/codecfix.sh"
+            chmod 0755 "${'$'}NEW_DIR/detect.sh"
+
+            if [ -e /dev/hevc ]; then
+                mv /dev/hevc "${'$'}OLD_DIR"
+                OLD_MOVED=1
+            fi
+            mv "${'$'}NEW_DIR" /dev/hevc
+            SWAPPED=1
             chmod 0755 /dev/hevc/preflight.sh
             chmod 0755 /dev/hevc/codecfix.sh
+            chmod 0755 /dev/hevc/detect.sh
             cd /dev/hevc
-            ${skipPrefix}./codecfix.sh ${variant.argument}
+            ${preflightPrefix}./codecfix.sh ${variant.argument}
+            echo "phase:verify_variant"
+            VERIFY_OUTPUT="${'$'}(sh ./detect.sh)"
+            printf '%s\n' "${'$'}VERIFY_OUTPUT"
+            DETECTED_VARIANT="${'$'}(printf '%s\n' "${'$'}VERIFY_OUTPUT" | sed -n 's/^variant://p' | head -n 1)"
+            if [ "${'$'}DETECTED_VARIANT" != "${variant.argument}" ]; then
+                echo "status:error"
+                echo "reason:verification_mismatch:${variant.argument}:${'$'}{DETECTED_VARIANT:-unknown}"
+                echo "phase:automatic_restore"
+                if ./codecfix.sh restore; then
+                    echo "rollback:ok"
+                else
+                    echo "rollback:failed"
+                fi
+                exit 1
+            fi
         """.trimIndent()
 
         return "su root sh -c ${script.shellQuote()}"
@@ -157,20 +263,56 @@ class HevcCodecFixRepository(
         return "su root sh -c ${readAssetText(PREFLIGHT_ASSET).shellQuote()}"
     }
 
+    private fun buildRestoreCommand(): String {
+        val script = "set -- restore\n${readAssetText(CODECFIX_ASSET)}"
+        return "su root sh -c ${script.shellQuote()}"
+    }
+
     private fun buildDetectCommand(): String {
-        return "su root sh -c ${DETECT_SCRIPT.shellQuote()}"
+        return "su root sh -c ${readAssetText(DETECT_ASSET).shellQuote()}"
+    }
+
+    private fun buildDiagnosticsCommand(): String {
+        val preflight = readAssetText(PREFLIGHT_ASSET)
+        val detect = readAssetText(DETECT_ASSET)
+        val script = """
+            echo "atlas_diagnostics:1"
+            echo "section:identity"
+            echo "uid:${'$'}(id -u 2>/dev/null || echo unknown)"
+            echo "board_platform:${'$'}(getprop ro.board.platform 2>/dev/null)"
+            echo "soc_model:${'$'}(getprop ro.soc.model 2>/dev/null)"
+            echo "product_device:${'$'}(getprop ro.product.device 2>/dev/null)"
+            echo "section:files"
+            for target in \
+                /vendor/etc/media_codecs_msmnile.xml \
+                /vendor/etc/media_codecs_performance_msmnile.xml \
+                /vendor/etc/media_profiles_msmnile.xml \
+                /vendor/etc/video_system_specs.json \
+                /vendor/etc/media_msmnile/video_system_specs.json; do
+                if [ -f "${'$'}target" ]; then
+                    echo "file:${'$'}target:present"
+                else
+                    echo "file:${'$'}target:missing"
+                fi
+            done
+            echo "section:mounts"
+            mount 2>/dev/null | grep -E '/vendor/etc/(media_codecs_msmnile.xml|media_codecs_performance_msmnile.xml|media_profiles_msmnile.xml|video_system_specs.json|media_msmnile/video_system_specs.json)' || echo "mounts:none"
+            echo "section:preflight"
+            sh -c ${preflight.shellQuote()}
+            echo "section:detect"
+            sh -c ${detect.shellQuote()}
+            echo "phase:diagnostics_complete"
+        """.trimIndent()
+        return "su root sh -c ${script.shellQuote()}"
     }
 
     private fun readAssetText(assetPath: String): String {
-        return context.assets.open(assetPath).bufferedReader().use { it.readText() }
+        return assets.readText(assetPath)
     }
 
-    private fun detectVariant(output: String): HevcCodecFixVariant? {
+    internal fun detectVariant(output: String): HevcCodecFixVariant? {
         val text = output.lowercase()
-        if (!output.isCommandSuccess()) return null
-        Regex("""(?:^|\s)variant:([a-z0-9_-]+)""").find(text)?.let { match ->
-            return HevcCodecFixVariant.fromArgument(match.groupValues[1])
-        }
+        parseReportedVariant(text)?.let { return it }
         return when {
             "/dev/hevc/ultra/" in text -> HevcCodecFixVariant.ULTRA
             "/dev/hevc/max/" in text -> HevcCodecFixVariant.MAX
@@ -182,11 +324,18 @@ class HevcCodecFixRepository(
         }
     }
 
+    private fun parseReportedVariant(output: String): HevcCodecFixVariant? {
+        val match = Regex("""(?:^|\s)variant:([a-z0-9_-]+)""", RegexOption.IGNORE_CASE)
+            .find(output)
+            ?: return null
+        return HevcCodecFixVariant.fromArgument(match.groupValues[1])
+    }
+
     private fun parseCompatibilityStatus(output: String): HevcCodecFixCompatibilityStatus {
         return HevcCodecFixCompatibilityStatus.fromValue(parseKey(output, "status"))
     }
 
-    private fun parseKey(output: String, key: String): String? {
+    internal fun parseKey(output: String, key: String): String? {
         return Regex("""(?m)^${Regex.escape(key)}:([^\r\n]*)""")
             .find(output)
             ?.groupValues
@@ -194,86 +343,36 @@ class HevcCodecFixRepository(
             ?.trim()
     }
 
-    private fun String.isCommandSuccess(): Boolean {
-        return !contains("ADB helper disabled", ignoreCase = true) &&
-            !contains("ADB disconnected", ignoreCase = true) &&
-            !contains("ADB connect failed", ignoreCase = true) &&
-            !contains("ADB command failed", ignoreCase = true) &&
-            !contains("ADB command timed out", ignoreCase = true) &&
-            !contains("ADB execute error", ignoreCase = true)
+    private suspend fun executeCatching(command: String, timeoutMs: Long): AdbCommandResult {
+        return try {
+            adb.execute(command, timeoutMs)
+        } catch (t: CancellationException) {
+            throw t
+        } catch (t: Throwable) {
+            Log.e(TAG, "ADB command invocation failed", t)
+            AdbCommandResult.failure(
+                AdbCommandFailureKind.TRANSPORT,
+                t.message ?: t.javaClass.simpleName
+            )
+        }
+    }
+
+    private fun contextText(resource: Int, vararg arguments: Any): String {
+        return assets.getString(resource, *arguments)
     }
 
     private fun String.shellQuote(): String = "'" + replace("'", "'\"'\"'") + "'"
 
     private companion object {
+        private val operationMutex = Mutex()
         private const val TAG = "AtlasCodecFix"
-        private const val HEVC_DIR_NAME = "hevc"
         private const val PREFLIGHT_ASSET = "preflight.sh"
-        private const val PREFLIGHT_TIMEOUT_MS = 12_000L
+        private const val CODECFIX_ASSET = "codecfix.sh"
+        private const val DETECT_ASSET = "detect.sh"
+        private const val PREFLIGHT_TIMEOUT_MS = 45_000L
         private const val DETECT_TIMEOUT_MS = 12_000L
+        private const val DIAGNOSTICS_TIMEOUT_MS = 45_000L
         private const val APPLY_TIMEOUT_MS = 60_000L
-        private val ASSET_ROOTS = listOf(PREFLIGHT_ASSET, "codecfix.sh", "default", "min", "max", "ultra")
-        private val DETECT_SCRIPT = """
-            TARGET_CODECS="/vendor/etc/media_codecs_msmnile.xml"
-            TARGET_PERFORMANCE="/vendor/etc/media_codecs_performance_msmnile.xml"
-            TARGET_PROFILES="/vendor/etc/media_profiles_msmnile.xml"
-            TARGET_SPECS="/vendor/etc/video_system_specs.json"
-            TARGET_MSMNILE_SPECS="/vendor/etc/media_msmnile/video_system_specs.json"
-            BASE_DIR="/dev/hevc"
-
-            for target in \
-                "${'$'}TARGET_CODECS" \
-                "${'$'}TARGET_PERFORMANCE" \
-                "${'$'}TARGET_PROFILES" \
-                "${'$'}TARGET_SPECS" \
-                "${'$'}TARGET_MSMNILE_SPECS"; do
-                if [ ! -f "${'$'}target" ]; then
-                    echo "variant:unknown"
-                    echo "missing:${'$'}target"
-                    exit 0
-                fi
-            done
-
-            mounted_targets="${'$'}(mount | grep -E "/vendor/etc/(media_codecs_msmnile.xml|media_codecs_performance_msmnile.xml|media_profiles_msmnile.xml|video_system_specs.json|media_msmnile/video_system_specs.json)" || true)"
-            if [ -z "${'$'}mounted_targets" ]; then
-                echo "variant:msmnile"
-                exit 0
-            fi
-
-            matches_folder() {
-                NAME="${'$'}1"
-                SRC_DIR="${'$'}BASE_DIR/${'$'}NAME"
-                [ -f "${'$'}SRC_DIR/media_codecs_${'$'}NAME.xml" ] || return 1
-                [ -f "${'$'}SRC_DIR/media_codecs_performance_${'$'}NAME.xml" ] || return 1
-                [ -f "${'$'}SRC_DIR/media_profiles_${'$'}NAME.xml" ] || return 1
-                [ -f "${'$'}SRC_DIR/video_system_specs_${'$'}NAME.json" ] || return 1
-                cmp -s "${'$'}TARGET_CODECS" "${'$'}SRC_DIR/media_codecs_${'$'}NAME.xml" &&
-                    cmp -s "${'$'}TARGET_PERFORMANCE" "${'$'}SRC_DIR/media_codecs_performance_${'$'}NAME.xml" &&
-                    cmp -s "${'$'}TARGET_PROFILES" "${'$'}SRC_DIR/media_profiles_${'$'}NAME.xml" &&
-                    cmp -s "${'$'}TARGET_SPECS" "${'$'}SRC_DIR/video_system_specs_${'$'}NAME.json" &&
-                    cmp -s "${'$'}TARGET_MSMNILE_SPECS" "${'$'}SRC_DIR/video_system_specs_${'$'}NAME.json"
-            }
-
-            if matches_folder ultra; then echo "variant:ultra"; exit 0; fi
-            if matches_folder max; then echo "variant:max"; exit 0; fi
-            if matches_folder min; then echo "variant:min"; exit 0; fi
-
-            if [ -f /vendor/etc/media_codecs_direwolf.xml ] &&
-                [ -f /vendor/etc/media_codecs_performance_direwolf.xml ] &&
-                [ -f /vendor/etc/media_profiles_direwolf.xml ] &&
-                [ -f /vendor/etc/media_direwolf/video_system_specs.json ] &&
-                cmp -s "${'$'}TARGET_CODECS" /vendor/etc/media_codecs_direwolf.xml &&
-                cmp -s "${'$'}TARGET_PERFORMANCE" /vendor/etc/media_codecs_performance_direwolf.xml &&
-                cmp -s "${'$'}TARGET_PROFILES" /vendor/etc/media_profiles_direwolf.xml &&
-                cmp -s "${'$'}TARGET_SPECS" /vendor/etc/media_direwolf/video_system_specs.json &&
-                cmp -s "${'$'}TARGET_MSMNILE_SPECS" /vendor/etc/media_direwolf/video_system_specs.json; then
-                echo "variant:direwolf"
-                exit 0
-            fi
-
-            echo "variant:unknown"
-            echo "${'$'}mounted_targets"
-        """.trimIndent()
     }
 }
 
@@ -316,11 +415,20 @@ data class HevcCodecFixDetectResult(
     val commandSuccess: Boolean
 )
 
+data class HevcCodecFixDiagnosticResult(
+    val output: String,
+    val commandSuccess: Boolean,
+    val variant: HevcCodecFixVariant?
+)
+
 data class HevcCodecFixApplyResult(
     val requestedVariant: HevcCodecFixVariant,
     val detectedVariant: HevcCodecFixVariant?,
     val runOutput: String,
     val detectOutput: String,
     val success: Boolean,
-    val compatibility: HevcCodecFixCompatibilityResult? = null
+    val compatibility: HevcCodecFixCompatibilityResult? = null,
+    val retryable: Boolean = false,
+    val recoveryOutput: String = "",
+    val restoredToDefault: Boolean = false
 )
