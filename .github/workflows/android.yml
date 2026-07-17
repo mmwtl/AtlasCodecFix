@@ -31,7 +31,7 @@ jobs:
         run: sdkmanager "platforms;android-36" "build-tools;36.1.0"
 
       - name: Set up Gradle cache
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       - name: Verify wrapper and shell syntax
         run: |
