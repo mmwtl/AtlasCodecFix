@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!--
+      The newer versions currently reported by lint require API 37 / AGP 9.x. AtlasCodecFix is
+      deliberately pinned to the latest stable API 36-compatible toolchain; Dependabot continues
+      to report upgrade candidates.
+    -->
+    <issue id="AndroidGradlePluginVersion" severity="ignore" />
+    <issue id="GradleDependency" severity="ignore" />
+    <issue id="NewerVersionAvailable" severity="ignore" />
+</lint>

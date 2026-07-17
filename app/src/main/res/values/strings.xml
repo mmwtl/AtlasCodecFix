@@ -1,4 +1,114 @@
 <resources>
     <string name="app_name">Atlas Codec Fix</string>
     <string name="quick_apply_name">Codec Profiles</string>
+    <string name="notification_channel_errors">Ошибки Codec Fix</string>
+
+    <string name="variant_msmnile_description">Стандартный профиль msmnile</string>
+    <string name="variant_direwolf_description">Применить штатные Direwolf-конфиги — экспериментально</string>
+    <string name="variant_min_description">Стандартный набор, только раскомментирован HEVC</string>
+    <string name="variant_max_description">Экспериментальный набор с возможностями из других платформ</string>
+    <string name="variant_ultra_description">Максимальный C2/QTI-first набор — экспериментально</string>
+    <string name="experimental_profiles_separator">Экспериментальные профили</string>
+
+    <string name="section_adb">ADB подключение</string>
+    <string name="adb_helper">ADB helper</string>
+    <string name="adb_helper_description">Подключение к локальному adbd</string>
+    <string name="adb_host">Адрес ADB</string>
+    <string name="adb_host_hint">Для головного устройства обычно localhost</string>
+    <string name="adb_port">Порт ADB</string>
+    <string name="action_connect">Подключить</string>
+    <string name="action_disconnect">Отключить</string>
+    <string name="action_check">Проверить</string>
+    <string name="action_run_preflight">Запустить preflight</string>
+    <string name="action_run_diagnostics">Диагностика</string>
+    <string name="action_apply">Применить</string>
+    <string name="action_cancel">Отмена</string>
+
+    <string name="section_auto_profile">Профиль автоприменения</string>
+    <string name="current_variant">Текущий вариант: %1$s</string>
+    <string name="variant_unknown">не определён</string>
+    <string name="section_auto_apply">Автоприменение</string>
+    <string name="apply_after_boot">Применять после загрузки</string>
+    <string name="selected_auto_variant">Будет использован выбранный вариант: %1$s</string>
+    <string name="unsafe_mode">Небезопасный режим</string>
+    <string name="unsafe_mode_description">Пропустить preflight и разрешить автоприменение экспериментальных профилей</string>
+
+    <string name="section_errors">Ошибки</string>
+    <string name="error_notifications">Ошибки уведомлениями</string>
+    <string name="error_notifications_description">Показывать ошибки ADB, preflight и применения</string>
+
+    <string name="adb_connected">ADB подключён</string>
+    <string name="adb_connecting">ADB подключается</string>
+    <string name="adb_disconnected">ADB отключён</string>
+    <string name="adb_error">ADB ошибка: %1$s</string>
+    <string name="adb_endpoint_invalid">Укажите корректный адрес и порт ADB</string>
+    <string name="adb_connect_failed">Не удалось подключиться к ADB</string>
+    <string name="error_title_adb_connection">ADB подключение</string>
+    <string name="adb_disabled_message">ADB выключен. Включите его в основном приложении.</string>
+    <string name="error_title_adb_disabled">ADB выключен</string>
+
+    <string name="auto_disabled_for_experimental">Автоприменение отключено: %1$s требует небезопасный режим</string>
+    <string name="enable_adb_first">Сначала включите ADB helper</string>
+    <string name="auto_requires_unsafe">Для автоприменения %1$s нужен небезопасный режим</string>
+    <string name="checking_compatibility">Проверяю совместимость</string>
+    <string name="running_preflight">Запускаю preflight без применения профиля</string>
+    <string name="preflight_no_output">Preflight не вернул отчёт</string>
+    <string name="running_diagnostics">Собираю безопасный диагностический отчёт</string>
+    <string name="diagnostics_no_output">Диагностика не вернула отчёт</string>
+    <string name="error_title_diagnostics">Диагностика Codec Fix</string>
+    <string name="auto_unavailable">Автоприменение недоступно для этого устройства</string>
+    <string name="error_title_auto_unavailable">Автоприменение недоступно</string>
+    <string name="auto_enabled_for">Автоприменение включено для %1$s</string>
+    <string name="auto_disabled">Автоприменение выключено</string>
+    <string name="auto_apply_connect_failed">Не удалось подключиться к ADB для автоприменения</string>
+    <string name="auto_apply_detect_failed">Не удалось определить текущий профиль</string>
+    <string name="auto_apply_failed_for">Не удалось автоматически применить %1$s</string>
+    <string name="auto_apply_stopped">Автоприменение остановлено после %1$d попыток: %2$s</string>
+    <string name="auto_apply_schedule_failed">Не удалось запланировать автоприменение</string>
+    <string name="unsafe_disabled_auto_disabled">Небезопасный режим выключен; автоприменение экспериментального профиля отключено</string>
+    <string name="unsafe_enabled">Небезопасный режим включён</string>
+    <string name="compatibility_enabled">Проверка совместимости включена</string>
+
+    <string name="notifications_enabled">Уведомления об ошибках включены</string>
+    <string name="notifications_disabled">Уведомления об ошибках выключены</string>
+    <string name="notification_permission_denied">Разрешение на уведомления не выдано</string>
+
+    <string name="checking_current_fix">Проверяю текущий фикс</string>
+    <string name="checking_current_profile">Проверяю текущий профиль</string>
+    <string name="check_not_completed">Проверка не выполнена</string>
+    <string name="error_title_fix_check">Проверка фикса</string>
+    <string name="error_title_profile_check">Проверка профиля</string>
+    <string name="applying_variant">Применяю %1$s</string>
+    <string name="applied_variant">Применено: %1$s</string>
+    <string name="apply_failed">Не удалось применить профиль</string>
+    <string name="automatic_restore_succeeded">Профиль не подтверждён. Default автоматически восстановлен.</string>
+    <string name="error_title_apply_failed">Не удалось применить %1$s</string>
+    <string name="compatibility_not_confirmed">Совместимость устройства не подтверждена</string>
+    <string name="experimental_confirmation_required">Экспериментальный профиль %1$s требует явного подтверждения</string>
+
+    <string name="section_codecs">Доступные кодеки</string>
+    <string name="collecting_codecs">Собираю список кодеков</string>
+    <string name="collecting_short">Собираю список</string>
+    <string name="show_codecs">Посмотреть кодеки</string>
+    <string name="codecs_found">Найдено кодеков: %1$d</string>
+    <string name="codecs_shown">%1$s. Показано: %2$d</string>
+    <string name="filter_hardware">Хардовые</string>
+    <string name="filter_software">Софтовые</string>
+    <string name="filter_video">Видео</string>
+    <string name="filter_audio">Аудио</string>
+    <string name="error_title_codec_list">Список кодеков</string>
+    <string name="codec_hardware">хардовый</string>
+    <string name="codec_software">софтовый</string>
+    <string name="codec_acceleration_unknown">неизвестно</string>
+    <string name="codec_video">видео</string>
+    <string name="codec_audio">аудио</string>
+    <string name="codec_other">другое</string>
+    <string name="codec_encoder">encoder</string>
+    <string name="codec_decoder">decoder</string>
+
+    <string name="quick_title">Профиль кодеков</string>
+    <string name="experimental_warning_short">%1$s использует возможности других платформ</string>
+    <string name="risk_confirmation_title">Подтвердите риск</string>
+    <string name="experimental_warning">%1$s содержит возможности и camera-профили других платформ. Неподдерживаемые режимы могут нарушить работу медиа или камеры.</string>
+    <string name="risky_warning">Preflight не смог уверенно подтвердить совместимость устройства. Продолжить ручное применение %1$s?</string>
 </resources>

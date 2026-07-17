@@ -4,18 +4,27 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+val secureSigningScript = providers.gradleProperty("secure.signing")
+    .orNull
+    ?.let(rootProject::file)
+val hasReleaseSigning = secureSigningScript?.isFile == true
+val appVersionCode = 19
+val appVersionName = "1.2.8"
+
+base {
+    archivesName.set("$appVersionName[$appVersionCode]AtlasCodecFix")
+}
+
 android {
     namespace = "com.mmwtl.atlascodecfix"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.mmwtl.atlascodecfix"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 10
-        versionName = "1.1.8"
-
-        setProperty("archivesBaseName", "$versionName[$versionCode]AtlasCodecFix")
+        targetSdk = 36
+        versionCode = appVersionCode
+        versionName = appVersionName
     }
 
     buildFeatures {
@@ -28,15 +37,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
         }
     }
@@ -47,10 +51,34 @@ android {
         }
     }
 
-    if (project.hasProperty("secure.signing")) {
-        val signingScript = rootProject.file(project.property("secure.signing") as String)
-        if (signingScript.exists()) {
-            apply(signingScript)
+    androidResources {
+        ignoreAssetsPatterns.add("default")
+        ignoreAssetsPatterns.add("tests")
+    }
+
+    lint {
+        lintConfig = rootProject.file("lint.xml")
+    }
+
+    if (hasReleaseSigning) {
+        apply(secureSigningScript!!)
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
+if (!hasReleaseSigning) {
+    tasks.configureEach {
+        if (name == "packageRelease" || name == "bundleRelease") {
+            doFirst {
+                throw GradleException(
+                    "Release signing is required. Configure secure.signing or build the debug variant."
+                )
+            }
         }
     }
 }
@@ -65,6 +93,8 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.adb.shell)
+
+    testImplementation(libs.junit)
 
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)

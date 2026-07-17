@@ -2,16 +2,14 @@ package com.mmwtl.atlascodecfix
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.media.MediaCodecInfo
-import android.media.MediaCodecList
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -20,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -31,15 +28,15 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,144 +45,46 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import androidx.compose.ui.res.stringResource
 
 class MainActivity : ComponentActivity() {
-    private val appContainer: CodecFixApp
-        get() = application as CodecFixApp
-
-    private var screenState by mutableStateOf(CodecFixScreenState())
+    private val viewModel: CodecFixViewModel by viewModels {
+        CodecFixViewModel.Factory(application as CodecFixApp)
+    }
+    private val notificationPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        viewModel.onNotificationPermissionResult(granted)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val prefs = appContainer.prefs
-        screenState = screenState.copy(
-            adbEnabled = prefs.adbEnabled,
-            adbPortText = prefs.adbPort.toString(),
-            autoApply = prefs.autoApply,
-            skipCompatibilityCheck = prefs.skipCompatibilityCheck,
-            errorNotificationsEnabled = prefs.errorNotificationsEnabled,
-            selectedVariant = prefs.selectedVariant
-        )
-
-        lifecycleScope.launch {
-            appContainer.adbClient.connectionState.collect { state ->
-                screenState = screenState.copy(connectionState = state)
-            }
-        }
-
         setContent {
+            val screenState by viewModel.state.collectAsState()
             AtlasCodecFixTheme {
                 CodecFixScreen(
                     state = screenState,
-                    onAdbEnabledChange = ::setAdbEnabled,
-                    onPortChange = ::setAdbPort,
-                    onConnect = ::connectAdb,
-                    onDisconnect = ::disconnectAdb,
-                    onVariantSelected = ::selectVariant,
-                    onRefresh = ::refreshCurrentVariant,
-                    onAutoApplyChange = ::setAutoApply,
-                    onSkipCompatibilityCheckChange = ::setSkipCompatibilityCheck,
-                    onLoadCodecs = ::loadAvailableCodecs,
-                    onCodecHardwareChange = ::setCodecHardwareFilter,
-                    onCodecSoftwareChange = ::setCodecSoftwareFilter,
-                    onCodecAudioChange = ::setCodecAudioFilter,
-                    onCodecVideoChange = ::setCodecVideoFilter,
+                    onAdbEnabledChange = viewModel::setAdbEnabled,
+                    onHostChange = viewModel::setAdbHost,
+                    onPortChange = viewModel::setAdbPort,
+                    onConnect = viewModel::connectAdb,
+                    onDisconnect = viewModel::disconnectAdb,
+                    onVariantSelected = viewModel::selectVariant,
+                    onRefresh = viewModel::refreshCurrentVariant,
+                    onPreflight = viewModel::runPreflightCheck,
+                    onDiagnostics = viewModel::runDiagnostics,
+                    onAutoApplyChange = viewModel::setAutoApply,
+                    onSkipCompatibilityCheckChange = viewModel::setSkipCompatibilityCheck,
+                    onLoadCodecs = viewModel::loadAvailableCodecs,
+                    onCodecHardwareChange = viewModel::setCodecHardwareFilter,
+                    onCodecSoftwareChange = viewModel::setCodecSoftwareFilter,
+                    onCodecAudioChange = viewModel::setCodecAudioFilter,
+                    onCodecVideoChange = viewModel::setCodecVideoFilter,
                     onErrorNotificationsChange = ::setErrorNotificationsEnabled
                 )
             }
         }
-
-        if (prefs.adbEnabled) {
-            connectAdb()
-            refreshCurrentVariant()
-        }
-    }
-
-    private fun setAdbEnabled(enabled: Boolean) {
-        appContainer.prefs.adbEnabled = enabled
-        screenState = screenState.copy(adbEnabled = enabled)
-        if (enabled) connectAdb() else disconnectAdb()
-    }
-
-    private fun setAdbPort(text: String) {
-        val sanitized = text.filter(Char::isDigit).take(5)
-        screenState = screenState.copy(adbPortText = sanitized)
-        val port = sanitized.toIntOrNull()?.takeIf { it in 1..65535 } ?: return
-        appContainer.prefs.adbPort = port
-    }
-
-    private fun connectAdb() {
-        lifecycleScope.launch {
-            val connected = withContext(Dispatchers.IO) { appContainer.adbClient.connect() }
-            val status = if (connected) "ADB подключён" else "Не удалось подключиться к ADB"
-            if (!connected) notifyError("ADB подключение", status)
-            screenState = screenState.copy(
-                status = status
-            )
-        }
-    }
-
-    private fun disconnectAdb() {
-        lifecycleScope.launch {
-            withContext(Dispatchers.IO) { appContainer.adbClient.disconnect() }
-            screenState = screenState.copy(status = "ADB отключён")
-        }
-    }
-
-    private fun selectVariant(variant: HevcCodecFixVariant) {
-        appContainer.prefs.selectedVariant = variant
-        screenState = screenState.copy(selectedVariant = variant)
-    }
-
-    private fun setAutoApply(enabled: Boolean) {
-        lifecycleScope.launch {
-            if (enabled && !screenState.skipCompatibilityCheck) {
-                screenState = screenState.copy(isBusy = true, status = "Проверяю совместимость")
-                val compatibility = withContext(Dispatchers.IO) {
-                    appContainer.codecFixRepository.checkCompatibility()
-                }
-                if (!compatibility.autoApplyAllowed) {
-                    val status = compatibility.output.trim().takeLast(220)
-                        .ifBlank { "Автоприменение недоступно для этого устройства" }
-                    appContainer.prefs.autoApply = false
-                    notifyError("Автоприменение недоступно", status)
-                    screenState = screenState.copy(
-                        autoApply = false,
-                        isBusy = false,
-                        status = status
-                    )
-                    return@launch
-                }
-            }
-
-            appContainer.prefs.autoApply = enabled
-            screenState = screenState.copy(
-                autoApply = enabled,
-                isBusy = false,
-                status = if (enabled) {
-                    "Автоприменение включено для ${screenState.selectedVariant.title}"
-                } else {
-                    "Автоприменение выключено"
-                }
-            )
-        }
-    }
-
-    private fun setSkipCompatibilityCheck(enabled: Boolean) {
-        appContainer.prefs.skipCompatibilityCheck = enabled
-        screenState = screenState.copy(
-            skipCompatibilityCheck = enabled,
-            status = if (enabled) {
-                "Проверка совместимости отключена"
-            } else {
-                "Проверка совместимости включена"
-            }
-        )
     }
 
     private fun setErrorNotificationsEnabled(enabled: Boolean) {
@@ -193,194 +92,25 @@ class MainActivity : ComponentActivity() {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_POST_NOTIFICATIONS)
-            return
-        }
-
-        appContainer.prefs.errorNotificationsEnabled = enabled
-        screenState = screenState.copy(
-            errorNotificationsEnabled = enabled,
-            status = if (enabled) {
-                "Уведомления об ошибках включены"
-            } else {
-                "Уведомления об ошибках выключены"
-            }
-        )
-    }
-
-    private fun refreshCurrentVariant() {
-        lifecycleScope.launch {
-            screenState = screenState.copy(isBusy = true, status = "Проверяю текущий фикс")
-            val detected = withContext(Dispatchers.IO) {
-                appContainer.codecFixRepository.detectCurrentVariant()
-            }
-            screenState = screenState.copy(
-                currentVariant = detected.variant,
-                isBusy = false,
-                status = if (detected.commandSuccess) {
-                    "Текущий вариант: ${detected.variant?.title ?: "не определён"}"
-                } else {
-                    val status = detected.output.trim().takeLast(220).ifBlank { "Проверка не выполнена" }
-                    notifyError("Проверка фикса", status)
-                    status
-                }
-            )
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            viewModel.setErrorNotificationsEnabled(enabled)
         }
     }
-
-    private fun loadAvailableCodecs() {
-        lifecycleScope.launch {
-            screenState = screenState.copy(isCodecListLoading = true, codecListStatus = "Собираю список кодеков")
-            val result = withContext(Dispatchers.Default) {
-                runCatching { collectAvailableCodecs() }
-            }
-            result
-                .onSuccess { codecs ->
-                    screenState = screenState.copy(
-                        codecs = codecs,
-                        isCodecListLoading = false,
-                        codecListStatus = "Найдено кодеков: ${codecs.size}"
-                    )
-                }
-                .onFailure { t ->
-                    val status = t.message ?: t.javaClass.simpleName
-                    notifyError("Список кодеков", status)
-                    screenState = screenState.copy(
-                        isCodecListLoading = false,
-                        codecListStatus = status
-                    )
-                }
-        }
-    }
-
-    private fun setCodecHardwareFilter(enabled: Boolean) {
-        screenState = screenState.copy(showHardwareCodecs = enabled)
-    }
-
-    private fun setCodecSoftwareFilter(enabled: Boolean) {
-        screenState = screenState.copy(showSoftwareCodecs = enabled)
-    }
-
-    private fun setCodecAudioFilter(enabled: Boolean) {
-        screenState = screenState.copy(showAudioCodecs = enabled)
-    }
-
-    private fun setCodecVideoFilter(enabled: Boolean) {
-        screenState = screenState.copy(showVideoCodecs = enabled)
-    }
-
-    private fun collectAvailableCodecs(): List<AvailableCodec> {
-        return MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos
-            .flatMap { info ->
-                val supportedTypes = info.supportedTypes
-                    .map(String::lowercase)
-                    .sorted()
-                listOf(
-                    AvailableCodec(
-                        name = info.name,
-                        supportedTypes = supportedTypes,
-                        isEncoder = info.isEncoder,
-                        acceleration = info.accelerationKind()
-                    )
-                )
-            }
-            .sortedWith(
-                compareBy<AvailableCodec> { it.primaryKind.sortOrder }
-                    .thenBy { it.acceleration.sortOrder }
-                    .thenBy { it.name.lowercase() }
-            )
-    }
-
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode != REQUEST_POST_NOTIFICATIONS) return
-
-        val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
-        appContainer.prefs.errorNotificationsEnabled = granted
-        screenState = screenState.copy(
-            errorNotificationsEnabled = granted,
-            status = if (granted) {
-                "Уведомления об ошибках включены"
-            } else {
-                "Разрешение на уведомления не выдано"
-            }
-        )
-    }
-
-    private fun notifyError(title: String, message: String) {
-        appContainer.errorNotifier.notify(title, message)
-    }
-
-    private companion object {
-        private const val REQUEST_POST_NOTIFICATIONS = 100
-    }
-}
-
-private data class CodecFixScreenState(
-    val adbEnabled: Boolean = false,
-    val adbPortText: String = "5555",
-    val autoApply: Boolean = false,
-    val skipCompatibilityCheck: Boolean = false,
-    val errorNotificationsEnabled: Boolean = false,
-    val selectedVariant: HevcCodecFixVariant = HevcCodecFixVariant.DEFAULT,
-    val currentVariant: HevcCodecFixVariant? = null,
-    val codecs: List<AvailableCodec> = emptyList(),
-    val isCodecListLoading: Boolean = false,
-    val codecListStatus: String? = null,
-    val showHardwareCodecs: Boolean = true,
-    val showSoftwareCodecs: Boolean = true,
-    val showAudioCodecs: Boolean = true,
-    val showVideoCodecs: Boolean = true,
-    val connectionState: AdbConnectionState = AdbConnectionState.Disconnected,
-    val isBusy: Boolean = false,
-    val status: String? = null
-)
-
-private data class AvailableCodec(
-    val name: String,
-    val supportedTypes: List<String>,
-    val isEncoder: Boolean,
-    val acceleration: CodecAcceleration
-) {
-    val primaryKind: CodecMediaKind
-        get() = when {
-            supportedTypes.any { it.startsWith("video/") } -> CodecMediaKind.VIDEO
-            supportedTypes.any { it.startsWith("audio/") } -> CodecMediaKind.AUDIO
-            else -> CodecMediaKind.OTHER
-        }
-}
-
-private enum class CodecAcceleration(
-    val title: String,
-    val sortOrder: Int
-) {
-    HARDWARE("хардовый", 0),
-    SOFTWARE("софтовый", 1),
-    UNKNOWN("неизвестно", 2)
-}
-
-private enum class CodecMediaKind(
-    val title: String,
-    val sortOrder: Int
-) {
-    VIDEO("видео", 0),
-    AUDIO("аудио", 1),
-    OTHER("другое", 2)
 }
 
 @Composable
 private fun CodecFixScreen(
     state: CodecFixScreenState,
     onAdbEnabledChange: (Boolean) -> Unit,
+    onHostChange: (String) -> Unit,
     onPortChange: (String) -> Unit,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
     onVariantSelected: (HevcCodecFixVariant) -> Unit,
     onRefresh: () -> Unit,
+    onPreflight: () -> Unit,
+    onDiagnostics: () -> Unit,
     onAutoApplyChange: (Boolean) -> Unit,
     onSkipCompatibilityCheckChange: (Boolean) -> Unit,
     onLoadCodecs: () -> Unit,
@@ -399,7 +129,7 @@ private fun CodecFixScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text(
-            text = "Atlas Codec Fix",
+            text = stringResource(R.string.app_name),
             color = MaterialTheme.colorScheme.onBackground,
             fontSize = 28.sp,
             fontWeight = FontWeight.SemiBold
@@ -407,15 +137,18 @@ private fun CodecFixScreen(
 
         StatusHeader(state)
 
-        Section(title = "ADB подключение") {
+        Section(title = stringResource(R.string.section_adb)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("ADB helper", fontWeight = FontWeight.Medium)
-                    Text("Подключение к локальному adbd", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.adb_helper), fontWeight = FontWeight.Medium)
+                    Text(
+                        stringResource(R.string.adb_helper_description),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 RectSwitch(
                     checked = state.adbEnabled,
@@ -426,10 +159,22 @@ private fun CodecFixScreen(
 
             OutlinedTextField(
                 modifier = Modifier.fillMaxWidth(),
+                value = state.adbHostText,
+                onValueChange = onHostChange,
+                enabled = !state.isBusy,
+                label = { Text(stringResource(R.string.adb_host)) },
+                supportingText = { Text(stringResource(R.string.adb_host_hint)) },
+                singleLine = true,
+                shape = RoundedCornerShape(8.dp),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
+            )
+
+            OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
                 value = state.adbPortText,
                 onValueChange = onPortChange,
                 enabled = !state.isBusy,
-                label = { Text("Порт ADB") },
+                label = { Text(stringResource(R.string.adb_port)) },
                 singleLine = true,
                 shape = RoundedCornerShape(8.dp),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
@@ -441,25 +186,55 @@ private fun CodecFixScreen(
                     shape = RoundedCornerShape(8.dp),
                     onClick = onConnect
                 ) {
-                    Text("Подключить")
+                    Text(stringResource(R.string.action_connect))
                 }
                 OutlinedButton(
                     enabled = !state.isBusy,
                     shape = RoundedCornerShape(8.dp),
                     onClick = onDisconnect
                 ) {
-                    Text("Отключить")
+                    Text(stringResource(R.string.action_disconnect))
                 }
+            }
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = state.adbEnabled && !state.isBusy,
+                shape = RoundedCornerShape(8.dp),
+                onClick = onPreflight
+            ) {
+                Text(stringResource(R.string.action_run_preflight))
+            }
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = state.adbEnabled && !state.isBusy,
+                shape = RoundedCornerShape(8.dp),
+                onClick = onDiagnostics
+            ) {
+                Text(stringResource(R.string.action_run_diagnostics))
             }
         }
 
-        Section(title = "Профиль автоприменения") {
+        Section(title = stringResource(R.string.section_auto_profile)) {
             Text(
-                text = "Текущий вариант: ${state.currentVariant?.title ?: "не определён"}",
+                text = stringResource(
+                    R.string.current_variant,
+                    state.currentVariant?.title ?: stringResource(R.string.variant_unknown)
+                ),
                 fontWeight = FontWeight.Medium
             )
 
-            HevcCodecFixVariant.USER_VISIBLE.forEach { variant ->
+            HevcCodecFixVariant.USER_VISIBLE.forEachIndexed { index, variant ->
+                if (index > 0 && variant.experimental &&
+                    !HevcCodecFixVariant.USER_VISIBLE[index - 1].experimental
+                ) {
+                    HorizontalDivider()
+                    Text(
+                        text = stringResource(R.string.experimental_profiles_separator),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
                 VariantButton(
                     variant = variant,
                     selected = state.selectedVariant == variant,
@@ -474,21 +249,21 @@ private fun CodecFixScreen(
                     shape = RoundedCornerShape(8.dp),
                     onClick = onRefresh
                 ) {
-                    Text("Проверить")
+                    Text(stringResource(R.string.action_check))
                 }
             }
         }
 
-        Section(title = "Автоприменение") {
+        Section(title = stringResource(R.string.section_auto_apply)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Применять после загрузки", fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.apply_after_boot), fontWeight = FontWeight.Medium)
                     Text(
-                        text = "Будет использован выбранный вариант: ${state.selectedVariant.title}",
+                        text = stringResource(R.string.selected_auto_variant, state.selectedVariant.title),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -505,9 +280,9 @@ private fun CodecFixScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Фикс без проверки", fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.unsafe_mode), fontWeight = FontWeight.Medium)
                     Text(
-                        text = "Игнорировать preflight и применять профиль напрямую",
+                        text = stringResource(R.string.unsafe_mode_description),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -528,16 +303,16 @@ private fun CodecFixScreen(
             onCodecVideoChange = onCodecVideoChange
         )
 
-        Section(title = "Ошибки") {
+        Section(title = stringResource(R.string.section_errors)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Ошибки уведомлениями", fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.error_notifications), fontWeight = FontWeight.Medium)
                     Text(
-                        text = "Показывать ошибки ADB, preflight и применения",
+                        text = stringResource(R.string.error_notifications_description),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -567,10 +342,10 @@ private fun CodecFixScreen(
 @Composable
 private fun StatusHeader(state: CodecFixScreenState) {
     val (label, color) = when (val connection = state.connectionState) {
-        AdbConnectionState.Connected -> "ADB подключён" to Color(0xFF22C55E)
-        AdbConnectionState.Connecting -> "ADB подключается" to Color(0xFFF59E0B)
-        AdbConnectionState.Disconnected -> "ADB отключён" to Color(0xFF94A3B8)
-        is AdbConnectionState.Error -> "ADB ошибка: ${connection.message}" to Color(0xFFEF4444)
+        AdbConnectionState.Connected -> stringResource(R.string.adb_connected) to Color(0xFF22C55E)
+        AdbConnectionState.Connecting -> stringResource(R.string.adb_connecting) to Color(0xFFF59E0B)
+        AdbConnectionState.Disconnected -> stringResource(R.string.adb_disconnected) to Color(0xFF94A3B8)
+        is AdbConnectionState.Error -> stringResource(R.string.adb_error, connection.message) to Color(0xFFEF4444)
     }
 
     Row(
@@ -613,34 +388,38 @@ private fun CodecListSection(
         accelerationVisible && (audioVisible || videoVisible)
     }
 
-    Section(title = "Доступные кодеки") {
+    Section(title = stringResource(R.string.section_codecs)) {
         Button(
             modifier = Modifier.fillMaxWidth(),
             enabled = !state.isCodecListLoading,
             shape = RoundedCornerShape(8.dp),
             onClick = onLoadCodecs
         ) {
-            Text(if (state.isCodecListLoading) "Собираю список" else "Посмотреть кодеки")
+            Text(
+                stringResource(
+                    if (state.isCodecListLoading) R.string.collecting_short else R.string.show_codecs
+                )
+            )
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             FilterSwitchRow(
-                title = "Хардовые",
+                title = stringResource(R.string.filter_hardware),
                 checked = state.showHardwareCodecs,
                 onCheckedChange = onCodecHardwareChange
             )
             FilterSwitchRow(
-                title = "Софтовые",
+                title = stringResource(R.string.filter_software),
                 checked = state.showSoftwareCodecs,
                 onCheckedChange = onCodecSoftwareChange
             )
             FilterSwitchRow(
-                title = "Видео",
+                title = stringResource(R.string.filter_video),
                 checked = state.showVideoCodecs,
                 onCheckedChange = onCodecVideoChange
             )
             FilterSwitchRow(
-                title = "Аудио",
+                title = stringResource(R.string.filter_audio),
                 checked = state.showAudioCodecs,
                 onCheckedChange = onCodecAudioChange
             )
@@ -648,7 +427,7 @@ private fun CodecListSection(
 
         state.codecListStatus?.takeIf { it.isNotBlank() }?.let { status ->
             Text(
-                text = "$status. Показано: ${filteredCodecs.size}",
+                text = stringResource(R.string.codecs_shown, status, filteredCodecs.size),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -681,7 +460,7 @@ private fun FilterSwitchRow(
 
 @Composable
 private fun CodecRow(codec: AvailableCodec) {
-    val role = if (codec.isEncoder) "encoder" else "decoder"
+    val role = stringResource(if (codec.isEncoder) R.string.codec_encoder else R.string.codec_decoder)
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
@@ -697,7 +476,8 @@ private fun CodecRow(codec: AvailableCodec) {
                 fontWeight = FontWeight.Medium
             )
             Text(
-                text = "${codec.primaryKind.title} / ${codec.acceleration.title} / $role",
+                text = "${stringResource(codec.primaryKind.titleRes)} / " +
+                    "${stringResource(codec.acceleration.titleRes)} / $role",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp
             )
@@ -716,35 +496,11 @@ fun RectSwitch(
     enabled: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
-    val trackColor = when {
-        !enabled -> MaterialTheme.colorScheme.surfaceVariant
-        checked -> MaterialTheme.colorScheme.primary
-        else -> Color(0xFF3A3A3A)
-    }
-    val thumbColor = if (checked) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    Box(
-        modifier = Modifier
-            .width(46.dp)
-            .height(28.dp)
-            .clip(RoundedCornerShape(6.dp))
-            .background(trackColor)
-            .clickable(enabled = enabled) { onCheckedChange(!checked) }
-            .padding(4.dp),
-        contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart
-    ) {
-        Box(
-            modifier = Modifier
-                .width(18.dp)
-                .height(20.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(thumbColor)
-        )
-    }
+    Switch(
+        checked = checked,
+        enabled = enabled,
+        onCheckedChange = onCheckedChange
+    )
 }
 
 @Composable
@@ -798,43 +554,7 @@ fun VariantButton(
         ) {
             Text(variant.title, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(2.dp))
-            Text(variant.description, fontSize = 12.sp)
+            Text(stringResource(variant.descriptionRes), fontSize = 12.sp)
         }
-    }
-}
-
-val appColors = darkColorScheme(
-    primary = Color(0xFF7893A0),
-    onPrimary = Color(0xFF071014),
-    background = Color(0xFF171717),
-    onBackground = Color(0xFFF5F5F5),
-    surface = Color(0xFF262626),
-    onSurface = Color(0xFFF5F5F5),
-    surfaceVariant = Color(0xFF333333),
-    onSurfaceVariant = Color(0xFFD4D4D4),
-    outline = Color(0xFF737373)
-)
-
-private fun MediaCodecInfo.accelerationKind(): CodecAcceleration {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        return when {
-            isHardwareAccelerated -> CodecAcceleration.HARDWARE
-            isSoftwareOnly -> CodecAcceleration.SOFTWARE
-            else -> CodecAcceleration.UNKNOWN
-        }
-    }
-
-    val lowerName = name.lowercase()
-    return when {
-        lowerName.startsWith("omx.google.") ||
-            lowerName.startsWith("c2.android.") ||
-            lowerName.startsWith("c2.google.") ||
-            lowerName.startsWith("omx.ffmpeg.") -> CodecAcceleration.SOFTWARE
-        lowerName.contains("qcom") ||
-            lowerName.contains("qti") ||
-            lowerName.contains("mtk") ||
-            lowerName.contains("exynos") ||
-            lowerName.contains("hisi") -> CodecAcceleration.HARDWARE
-        else -> CodecAcceleration.UNKNOWN
     }
 }
