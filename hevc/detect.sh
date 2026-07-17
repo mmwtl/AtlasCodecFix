@@ -2,6 +2,7 @@
 
 BASE_DIR="${HEVC_BASE_DIR:-/dev/hevc}"
 VENDOR_ETC="${HEVC_VENDOR_ETC:-/vendor/etc}"
+MOUNT_TABLE="${HEVC_MOUNT_TABLE:-/proc/self/mountinfo}"
 
 TARGET_CODECS="$VENDOR_ETC/media_codecs_msmnile.xml"
 TARGET_PERFORMANCE="$VENDOR_ETC/media_codecs_performance_msmnile.xml"
@@ -63,7 +64,13 @@ for target in \
     fi
 done
 
-mounted_targets="$(mount 2>/dev/null | grep -E "/vendor/etc/(media_codecs_msmnile.xml|media_codecs_performance_msmnile.xml|media_profiles_msmnile.xml|video_system_specs.json|media_msmnile/video_system_specs.json)" || true)"
+if [ ! -r "$MOUNT_TABLE" ]; then
+    echo "variant:unknown"
+    echo "reason:mount_table_unavailable"
+    exit 0
+fi
+
+mounted_targets="$(grep -E "/vendor/etc/(media_codecs_msmnile.xml|media_codecs_performance_msmnile.xml|media_profiles_msmnile.xml|video_system_specs.json|media_msmnile/video_system_specs.json)" "$MOUNT_TABLE" 2>/dev/null || true)"
 if [ -z "$mounted_targets" ]; then
     echo "variant:msmnile"
     exit 0

@@ -140,6 +140,7 @@ export PATH="$BIN_DIR:$PATH"
 export STATE_DIR STATE_FILE
 export HEVC_BASE_DIR="$BASE_DIR"
 export HEVC_VENDOR_ETC="$VENDOR_DIR"
+export HEVC_MOUNT_TABLE="$STATE_FILE"
 export SKIP_PREFLIGHT=1
 
 assert_contains() {

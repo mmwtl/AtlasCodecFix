@@ -185,12 +185,16 @@ class HevcCodecFixRepositoryTest {
         val result = repository.collectDiagnostics()
 
         assertTrue(result.commandSuccess)
-        val command = adb.commands.single()
-        assertTrue(command.startsWith("su root sh -c "))
-        assertFalse(command.contains("/dev/hevc.operation.lock"))
-        assertTrue(command.contains("atlas_diagnostics:1"))
-        assertFalse(command.contains("mount --bind"))
-        assertFalse(command.contains("umount"))
+        assertEquals(3, adb.commands.size)
+        assertTrue(adb.commands.all { it.startsWith("su root sh -c ") })
+        assertTrue(adb.commands.all { command ->
+            Regex("""\bsh -c\b""").findAll(command).count() == 1
+        })
+        assertTrue(adb.commands.none { it.contains("/dev/hevc.operation.lock") })
+        assertTrue(adb.commands.none { it.contains("mount ") || it.contains("umount") })
+        assertTrue(result.output.contains("atlas_diagnostics:2"))
+        assertTrue(result.output.contains("section:preflight"))
+        assertTrue(result.output.contains("section:detect"))
     }
 
     private class FakeAssets(

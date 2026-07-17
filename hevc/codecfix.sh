@@ -2,6 +2,7 @@
 
 BASE_DIR="${HEVC_BASE_DIR:-/dev/hevc}"
 VENDOR_ETC="${HEVC_VENDOR_ETC:-/vendor/etc}"
+MOUNT_TABLE="${HEVC_MOUNT_TABLE:-/proc/self/mountinfo}"
 
 TARGET_CODECS="$VENDOR_ETC/media_codecs_msmnile.xml"
 TARGET_PERFORMANCE="$VENDOR_ETC/media_codecs_performance_msmnile.xml"
@@ -53,7 +54,7 @@ restart_media() {
 }
 
 is_target_mounted() {
-    mount 2>/dev/null | grep -F "$1" >/dev/null 2>&1
+    [ -r "$MOUNT_TABLE" ] && grep -F "$1" "$MOUNT_TABLE" >/dev/null 2>&1
 }
 
 unmount_target() {

@@ -26,12 +26,27 @@ class HevcCodecFixRepository internal constructor(
 
     suspend fun collectDiagnostics(): HevcCodecFixDiagnosticResult = withContext(Dispatchers.IO) {
         operationMutex.withLock {
-            val commandResult = executeCatching(buildDiagnosticsCommand(), DIAGNOSTICS_TIMEOUT_MS)
-            val output = commandResult.displayOutput
+            val identity = executeCatching(
+                buildDiagnosticIdentityCommand(),
+                DIAGNOSTICS_IDENTITY_TIMEOUT_MS
+            )
+            val compatibility = checkCompatibilityLocked()
+            val detected = detectCurrentVariantLocked()
+            val output = buildString {
+                appendLine("atlas_diagnostics:2")
+                appendLine("section:identity")
+                appendLine(identity.displayOutput.ifBlank { "identity:no_output" })
+                appendLine("section:preflight")
+                appendLine(compatibility.output.ifBlank { "preflight:no_output" })
+                appendLine("section:detect")
+                append(detected.output.ifBlank { "detect:no_output" })
+            }.trim()
             HevcCodecFixDiagnosticResult(
                 output = output,
-                commandSuccess = commandResult.succeeded,
-                variant = if (commandResult.succeeded) detectVariant(output) else null
+                commandSuccess = identity.succeeded &&
+                    compatibility.commandSuccess &&
+                    detected.commandSuccess,
+                variant = detected.variant
             )
         }
     }
@@ -272,17 +287,12 @@ class HevcCodecFixRepository internal constructor(
         return "su root sh -c ${readAssetText(DETECT_ASSET).shellQuote()}"
     }
 
-    private fun buildDiagnosticsCommand(): String {
-        val preflight = readAssetText(PREFLIGHT_ASSET)
-        val detect = readAssetText(DETECT_ASSET)
+    private fun buildDiagnosticIdentityCommand(): String {
         val script = """
-            echo "atlas_diagnostics:1"
-            echo "section:identity"
             echo "uid:${'$'}(id -u 2>/dev/null || echo unknown)"
             echo "board_platform:${'$'}(getprop ro.board.platform 2>/dev/null)"
             echo "soc_model:${'$'}(getprop ro.soc.model 2>/dev/null)"
             echo "product_device:${'$'}(getprop ro.product.device 2>/dev/null)"
-            echo "section:files"
             for target in \
                 /vendor/etc/media_codecs_msmnile.xml \
                 /vendor/etc/media_codecs_performance_msmnile.xml \
@@ -295,13 +305,6 @@ class HevcCodecFixRepository internal constructor(
                     echo "file:${'$'}target:missing"
                 fi
             done
-            echo "section:mounts"
-            mount 2>/dev/null | grep -E '/vendor/etc/(media_codecs_msmnile.xml|media_codecs_performance_msmnile.xml|media_profiles_msmnile.xml|video_system_specs.json|media_msmnile/video_system_specs.json)' || echo "mounts:none"
-            echo "section:preflight"
-            sh -c ${preflight.shellQuote()}
-            echo "section:detect"
-            sh -c ${detect.shellQuote()}
-            echo "phase:diagnostics_complete"
         """.trimIndent()
         return "su root sh -c ${script.shellQuote()}"
     }
@@ -371,7 +374,7 @@ class HevcCodecFixRepository internal constructor(
         private const val DETECT_ASSET = "detect.sh"
         private const val PREFLIGHT_TIMEOUT_MS = 45_000L
         private const val DETECT_TIMEOUT_MS = 12_000L
-        private const val DIAGNOSTICS_TIMEOUT_MS = 45_000L
+        private const val DIAGNOSTICS_IDENTITY_TIMEOUT_MS = 12_000L
         private const val APPLY_TIMEOUT_MS = 60_000L
     }
 }

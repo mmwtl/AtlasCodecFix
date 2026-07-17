@@ -14,7 +14,7 @@ task: ADB connection setup, profile selection, manual quick apply, and optional 
 - Applies codec/profile/spec configs through a root shell.
 - Enforces a real command deadline by closing the ADB transport when a command times out.
 - Serializes profile operations process-wide inside the application.
-- Provides a read-only diagnostic report with root, platform, file, mount, preflight, and profile data.
+- Provides a read-only diagnostic report with root, platform, file, preflight, and profile data.
 - Shows the current Android codec list with hardware/software and audio/video filters.
 - Schedules auto-apply after boot and app update as a unique persisted job with bounded retries.
 - Can show ADB/preflight/apply errors as Android notifications.
