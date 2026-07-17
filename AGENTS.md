@@ -76,11 +76,12 @@ Use the repository wrapper. The common local SDK path is shown only as a conveni
 
 ```bash
 ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}" ./gradlew \
-  verify :app:assembleDebug
+  verify :app:assembleDebug :app:assembleRelease
 ```
 
-When private release signing is configured, also run `./gradlew :app:assembleRelease` and verify
-the resulting APK signature. Release packaging intentionally fails without signing material.
+Always build the release variant before handing off a completed fix and verify the resulting APK
+signature. Release packaging intentionally fails without signing material. If private signing is
+not available, report the release build as blocked; never weaken or bypass signing requirements.
 
 For shell-only checks:
 
@@ -92,7 +93,8 @@ sh -n hevc/codecfix.sh
 Before handing off a change:
 
 - run unit tests and Android lint;
-- build both debug and release variants when build/signing changes are involved;
+- build both debug and release variants;
+- verify the release APK signature;
 - validate XML, JSONC, and shell assets;
 - verify that `git status` contains only intended changes;
 - state explicitly when device-level root/ADB behavior could not be exercised on representative
@@ -115,6 +117,10 @@ Do not make unit tests depend on a running `adbd`, root, or the developer's sign
 ## Repository hygiene
 
 - `gradlew` and `*.sh` are executable; XML/JSON/image/source files are not.
+- After completing and verifying a fix, automatically create a Git commit unless the user
+  explicitly asks to leave the changes uncommitted. Stage only files belonging to that fix, use a
+  clear imperative commit message, and never include pre-existing or unrelated worktree changes.
+- Do not amend, rebase, push, or rewrite existing history unless the user explicitly requests it.
 - Never commit `secure.signing.gradle`, keystores, generated APKs, private ADB keys, SDK paths, or
   Gradle caches.
 - A distributable release must fail closed when release signing material is absent. If a locally
