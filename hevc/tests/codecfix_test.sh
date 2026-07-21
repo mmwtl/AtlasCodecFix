@@ -182,8 +182,14 @@ assert_contains 'reason:platform_not_msmnile' "$TMP_ROOT/preflight-risky.out"
 
 export HEVC_COMMAND_TIMEOUT_SECONDS=1
 export HANG_LAZY_UMOUNT_TARGET="$TARGET_CODECS"
+restore_started_at="$(date +%s)"
 sh "$HEVC_DIR/codecfix.sh" restore > "$TMP_ROOT/restore.out"
+restore_elapsed=$(( $(date +%s) - restore_started_at ))
 unset HANG_LAZY_UMOUNT_TARGET HEVC_COMMAND_TIMEOUT_SECONDS
+[ "$restore_elapsed" -lt 5 ] || {
+    echo "Restore exceeded its bounded unmount deadline (${restore_elapsed}s)" >&2
+    exit 1
+}
 assert_contains 'variant:msmnile' "$TMP_ROOT/restore.out"
 assert_contains "phase:unmount:$TARGET_CODECS:attempt:1" "$TMP_ROOT/restore.out"
 assert_file_text 'stock-codecs c2.qti.hevc' "$TARGET_CODECS"

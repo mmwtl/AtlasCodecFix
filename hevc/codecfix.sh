@@ -21,21 +21,34 @@ run_bounded() {
     timeout_seconds="$1"
     shift
 
-    "$@" &
+    "$@" </dev/null >/dev/null 2>&1 &
     command_pid="$!"
-    (
-        sleep "$timeout_seconds"
-        kill -TERM "$command_pid" 2>/dev/null || exit 0
-        sleep 1
-        kill -KILL "$command_pid" 2>/dev/null || true
-    ) &
-    watchdog_pid="$!"
+    polls=$((timeout_seconds * 10))
 
-    wait "$command_pid"
-    command_status="$?"
-    kill "$watchdog_pid" 2>/dev/null || true
-    wait "$watchdog_pid" 2>/dev/null || true
-    return "$command_status"
+    while kill -0 "$command_pid" 2>/dev/null && [ "$polls" -gt 0 ]; do
+        sleep 0.1
+        polls=$((polls - 1))
+    done
+
+    if ! kill -0 "$command_pid" 2>/dev/null; then
+        wait "$command_pid"
+        return "$?"
+    fi
+
+    kill -TERM "$command_pid" 2>/dev/null || true
+    polls=10
+    while kill -0 "$command_pid" 2>/dev/null && [ "$polls" -gt 0 ]; do
+        sleep 0.1
+        polls=$((polls - 1))
+    done
+    kill -KILL "$command_pid" 2>/dev/null || true
+
+    # A task blocked in uninterruptible kernel sleep can survive SIGKILL. Never wait for it here:
+    # it has no inherited ADB streams, and the caller will verify the mount table before success.
+    if ! kill -0 "$command_pid" 2>/dev/null; then
+        wait "$command_pid" 2>/dev/null || true
+    fi
+    return 124
 }
 
 kill_if_running() {
