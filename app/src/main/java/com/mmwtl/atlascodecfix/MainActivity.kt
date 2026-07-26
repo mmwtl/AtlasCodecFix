@@ -70,11 +70,14 @@ class MainActivity : ComponentActivity() {
                     onPortChange = viewModel::setAdbPort,
                     onConnect = viewModel::connectAdb,
                     onDisconnect = viewModel::disconnectAdb,
+                    onAdvancedFixChange = viewModel::setAdvancedFixEnabled,
                     onVariantSelected = viewModel::selectVariant,
                     onRefresh = viewModel::refreshCurrentVariant,
                     onPreflight = viewModel::runPreflightCheck,
                     onDiagnostics = viewModel::runDiagnostics,
-                    onAutoApplyChange = viewModel::setAutoApply,
+                    onAutoApplyCodecFixChange = viewModel::setAutoApplyCodecFix,
+                    onAutoApplyMediaFixChange = viewModel::setAutoApplyMediaFix,
+                    onAutoApplyDelayChange = viewModel::setAutoApplyDelay,
                     onSkipCompatibilityCheckChange = viewModel::setSkipCompatibilityCheck,
                     onLoadCodecs = viewModel::loadAvailableCodecs,
                     onCodecHardwareChange = viewModel::setCodecHardwareFilter,
@@ -107,11 +110,14 @@ private fun CodecFixScreen(
     onPortChange: (String) -> Unit,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
+    onAdvancedFixChange: (Boolean) -> Unit,
     onVariantSelected: (HevcCodecFixVariant) -> Unit,
     onRefresh: () -> Unit,
     onPreflight: () -> Unit,
     onDiagnostics: () -> Unit,
-    onAutoApplyChange: (Boolean) -> Unit,
+    onAutoApplyCodecFixChange: (Boolean) -> Unit,
+    onAutoApplyMediaFixChange: (Boolean) -> Unit,
+    onAutoApplyDelayChange: (String) -> Unit,
     onSkipCompatibilityCheckChange: (Boolean) -> Unit,
     onLoadCodecs: () -> Unit,
     onCodecHardwareChange: (Boolean) -> Unit,
@@ -136,6 +142,27 @@ private fun CodecFixScreen(
         )
 
         StatusHeader(state)
+
+        Section(title = stringResource(R.string.section_fix_mode)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.advanced_fix), fontWeight = FontWeight.Medium)
+                    Text(
+                        text = stringResource(R.string.advanced_fix_description),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                RectSwitch(
+                    checked = state.advancedFixEnabled,
+                    enabled = !state.isBusy,
+                    onCheckedChange = onAdvancedFixChange
+                )
+            }
+        }
 
         Section(title = stringResource(R.string.section_adb)) {
             Row(
@@ -214,42 +241,44 @@ private fun CodecFixScreen(
             }
         }
 
-        Section(title = stringResource(R.string.section_auto_profile)) {
-            Text(
-                text = stringResource(
-                    R.string.current_variant,
-                    state.currentVariant?.title ?: stringResource(R.string.variant_unknown)
-                ),
-                fontWeight = FontWeight.Medium
-            )
+        if (state.advancedFixEnabled) {
+            Section(title = stringResource(R.string.section_auto_profile)) {
+                Text(
+                    text = stringResource(
+                        R.string.current_variant,
+                        state.currentVariant?.title ?: stringResource(R.string.variant_unknown)
+                    ),
+                    fontWeight = FontWeight.Medium
+                )
 
-            HevcCodecFixVariant.USER_VISIBLE.forEachIndexed { index, variant ->
-                if (index > 0 && variant.experimental &&
-                    !HevcCodecFixVariant.USER_VISIBLE[index - 1].experimental
-                ) {
-                    HorizontalDivider()
-                    Text(
-                        text = stringResource(R.string.experimental_profiles_separator),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
+                HevcCodecFixVariant.USER_VISIBLE.forEachIndexed { index, variant ->
+                    if (index > 0 && variant.experimental &&
+                        !HevcCodecFixVariant.USER_VISIBLE[index - 1].experimental
+                    ) {
+                        HorizontalDivider()
+                        Text(
+                            text = stringResource(R.string.experimental_profiles_separator),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    VariantButton(
+                        variant = variant,
+                        selected = state.selectedVariant == variant,
+                        enabled = !state.isBusy,
+                        onClick = { onVariantSelected(variant) }
                     )
                 }
-                VariantButton(
-                    variant = variant,
-                    selected = state.selectedVariant == variant,
-                    enabled = !state.isBusy,
-                    onClick = { onVariantSelected(variant) }
-                )
-            }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(
-                    enabled = state.adbEnabled && !state.isBusy,
-                    shape = RoundedCornerShape(8.dp),
-                    onClick = onRefresh
-                ) {
-                    Text(stringResource(R.string.action_check))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(
+                        enabled = state.adbEnabled && !state.isBusy,
+                        shape = RoundedCornerShape(8.dp),
+                        onClick = onRefresh
+                    ) {
+                        Text(stringResource(R.string.action_check))
+                    }
                 }
             }
         }
@@ -261,18 +290,67 @@ private fun CodecFixScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.apply_after_boot), fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.auto_codecfix), fontWeight = FontWeight.Medium)
                     Text(
-                        text = stringResource(R.string.selected_auto_variant, state.selectedVariant.title),
+                        text = stringResource(
+                            if (state.advancedFixEnabled) {
+                                R.string.selected_auto_variant
+                            } else {
+                                R.string.fixed_auto_variant
+                            },
+                            state.effectiveAutoApplyVariant.title
+                        ),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 RectSwitch(
-                    checked = state.autoApply,
-                    enabled = state.adbEnabled || state.autoApply,
-                    onCheckedChange = onAutoApplyChange
+                    checked = state.autoApplyCodecFix,
+                    enabled = (state.adbEnabled || state.autoApplyCodecFix) && !state.isBusy,
+                    onCheckedChange = onAutoApplyCodecFixChange
                 )
             }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.auto_mediafix), fontWeight = FontWeight.Medium)
+                    Text(
+                        text = stringResource(R.string.auto_mediafix_description),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                RectSwitch(
+                    checked = state.autoApplyMediaFix,
+                    enabled = (state.adbEnabled || state.autoApplyMediaFix) && !state.isBusy,
+                    onCheckedChange = onAutoApplyMediaFixChange
+                )
+            }
+
+            OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
+                value = state.autoApplyDelayText,
+                onValueChange = onAutoApplyDelayChange,
+                enabled = !state.isBusy,
+                isError = !state.isAutoApplyDelayValid,
+                label = { Text(stringResource(R.string.auto_apply_delay)) },
+                supportingText = {
+                    Text(
+                        stringResource(
+                            if (state.isAutoApplyDelayValid) {
+                                R.string.auto_apply_delay_description
+                            } else {
+                                R.string.auto_apply_delay_invalid
+                            }
+                        )
+                    )
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(8.dp),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
 
             Row(
                 modifier = Modifier.fillMaxWidth(),

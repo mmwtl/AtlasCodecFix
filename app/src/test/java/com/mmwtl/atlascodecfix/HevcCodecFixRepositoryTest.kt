@@ -6,6 +6,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -197,6 +198,112 @@ class HevcCodecFixRepositoryTest {
         assertTrue(result.output.contains("section:detect"))
     }
 
+    @Test
+    fun mediaFixUsesDirectRootShellAndHandlesMissingProcess() = runBlocking {
+        val assets = FakeAssets(temporaryFolder.newFolder("mediafix"))
+        val adb = WorkflowAdbExecutor()
+        val repository = HevcCodecFixRepository(assets, adb)
+
+        val result = repository.runMediaFix()
+
+        assertTrue(result.success)
+        val command = adb.commands.single()
+        assertTrue(command.startsWith("su root sh -c "))
+        assertEquals(1, Regex("""\bsh -c\b""").findAll(command).count())
+        assertTrue(command.contains("pidof com.geely.mediawidget"))
+        assertTrue(command.contains("kill -9 \$PID_LIST"))
+        assertTrue(command.contains("reason:kill_failed:\$KILL_STATUS"))
+        assertTrue(command.contains("mediawidget:not_running"))
+    }
+
+    @Test
+    fun simpleModeAlternatesMinAndDefaultWithMediaFixLast() = runBlocking {
+        val assets = FakeAssets(temporaryFolder.newFolder("simple-toggle"))
+        val adb = WorkflowAdbExecutor()
+        val repository = HevcCodecFixRepository(assets, adb)
+
+        val enableResult = repository.runSimpleToggle(skipCompatibilityCheck = true)
+        val firstMediaIndex = adb.commands.indexOfFirst { it.contains("pidof com.geely.mediawidget") }
+        val firstApplyIndex = adb.commands.indexOfFirst { it.contains("NEW_DIR=") }
+
+        assertTrue(enableResult.success)
+        assertEquals(HevcCodecFixVariant.MIN, enableResult.targetVariant)
+        assertTrue(firstApplyIndex >= 0)
+        assertTrue(firstMediaIndex > firstApplyIndex)
+        assertEquals(HevcCodecFixVariant.MIN, adb.currentVariant)
+
+        val commandCountBeforeRestore = adb.commands.size
+        val restoreResult = repository.runSimpleToggle(skipCompatibilityCheck = true)
+        val restoreCommands = adb.commands.drop(commandCountBeforeRestore)
+
+        assertTrue(restoreResult.success)
+        assertEquals(HevcCodecFixVariant.DEFAULT, restoreResult.targetVariant)
+        assertTrue(restoreCommands.first().contains("echo codecfix"))
+        assertTrue(restoreCommands.any { it.contains("set -- restore") })
+        assertTrue(restoreCommands.last().contains("pidof com.geely.mediawidget"))
+        assertEquals(HevcCodecFixVariant.DEFAULT, adb.currentVariant)
+    }
+
+    @Test
+    fun simpleModeDoesNotRunMediaFixAfterCodecFailure() = runBlocking {
+        val assets = FakeAssets(temporaryFolder.newFolder("simple-failure"))
+        val adb = WorkflowAdbExecutor(failApply = true)
+        val repository = HevcCodecFixRepository(assets, adb)
+
+        val result = repository.runSimpleToggle(skipCompatibilityCheck = true)
+
+        assertFalse(result.success)
+        assertNull(result.mediaFixResult)
+        assertTrue(adb.commands.none { it.contains("pidof com.geely.mediawidget") })
+        assertEquals(HevcCodecFixVariant.DEFAULT, adb.currentVariant)
+    }
+
+    @Test
+    fun autoDefaultRestoreBypassesPreflightAndRunsMediaFixLast() = runBlocking {
+        val assets = FakeAssets(temporaryFolder.newFolder("auto-default"))
+        val adb = WorkflowAdbExecutor(
+            initialVariant = HevcCodecFixVariant.MIN,
+            compatibilityStatus = "unsupported"
+        )
+        val repository = HevcCodecFixRepository(assets, adb)
+
+        val result = repository.runAutoApply(
+            AutoApplyRequest(
+                applyCodecFix = true,
+                applyMediaFix = true,
+                variant = HevcCodecFixVariant.DEFAULT,
+                skipCompatibilityCheck = false
+            )
+        )
+
+        assertTrue(result.success)
+        assertTrue(adb.commands.none { it.contains(FakeAssets.PREFLIGHT_MARKER) })
+        assertTrue(adb.commands.any { it.contains("set -- restore") })
+        assertTrue(adb.commands.last().contains("pidof com.geely.mediawidget"))
+        assertEquals(0, assets.stageCount.get())
+    }
+
+    @Test
+    fun mediaOnlyAutoApplyDoesNotDetectOrStageCodecProfile() = runBlocking {
+        val assets = FakeAssets(temporaryFolder.newFolder("auto-media-only"))
+        val adb = WorkflowAdbExecutor()
+        val repository = HevcCodecFixRepository(assets, adb)
+
+        val result = repository.runAutoApply(
+            AutoApplyRequest(
+                applyCodecFix = false,
+                applyMediaFix = true,
+                variant = HevcCodecFixVariant.ULTRA,
+                skipCompatibilityCheck = false
+            )
+        )
+
+        assertTrue(result.success)
+        assertEquals(1, adb.commands.size)
+        assertTrue(adb.commands.single().contains("pidof com.geely.mediawidget"))
+        assertEquals(0, assets.stageCount.get())
+    }
+
     private class FakeAssets(
         private val directory: File,
         private val stageDelayMs: Long = 0
@@ -273,6 +380,50 @@ class HevcCodecFixRepositoryTest {
                 else -> "variant:${currentVariant.argument}"
             }
             return AdbCommandResult(stdout = output, exitCode = 0)
+        }
+    }
+
+    private class WorkflowAdbExecutor(
+        initialVariant: HevcCodecFixVariant = HevcCodecFixVariant.DEFAULT,
+        private val compatibilityStatus: String = "supported",
+        private val failApply: Boolean = false
+    ) : AdbCommandExecutor {
+        val commands = mutableListOf<String>()
+        var currentVariant: HevcCodecFixVariant = initialVariant
+            private set
+
+        override suspend fun execute(command: String, timeoutMs: Long): AdbCommandResult {
+            commands += command
+            return when {
+                command.contains(FakeAssets.PREFLIGHT_MARKER) -> AdbCommandResult(
+                    stdout = """
+                        status:$compatibilityStatus
+                        auto_apply:${if (compatibilityStatus == "supported") "yes" else "no"}
+                        variant:${currentVariant.argument}
+                    """.trimIndent(),
+                    exitCode = 0
+                )
+                command.contains("NEW_DIR=") -> {
+                    if (failApply) {
+                        AdbCommandResult(stdout = "status:error", exitCode = 1)
+                    } else {
+                        currentVariant = HevcCodecFixVariant.MIN
+                        AdbCommandResult(stdout = "status:ok", exitCode = 0)
+                    }
+                }
+                command.contains("set -- restore") -> {
+                    currentVariant = HevcCodecFixVariant.DEFAULT
+                    AdbCommandResult(stdout = "status:ok", exitCode = 0)
+                }
+                command.contains("pidof com.geely.mediawidget") -> AdbCommandResult(
+                    stdout = "status:ok\nmediawidget:not_running",
+                    exitCode = 0
+                )
+                else -> AdbCommandResult(
+                    stdout = "variant:${currentVariant.argument}",
+                    exitCode = 0
+                )
+            }
         }
     }
 

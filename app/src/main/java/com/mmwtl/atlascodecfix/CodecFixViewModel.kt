@@ -28,7 +28,7 @@ class CodecFixViewModel(
         }
         if (app.prefs.adbEnabled) {
             connectAdb()
-            refreshCurrentVariant()
+            if (app.prefs.advancedFixEnabled) refreshCurrentVariant()
         }
     }
 
@@ -80,19 +80,56 @@ class CodecFixViewModel(
         }
     }
 
+    fun setAdvancedFixEnabled(enabled: Boolean) {
+        app.prefs.advancedFixEnabled = enabled
+        var codecAutoApplyDisabled = false
+        if (
+            enabled &&
+            app.prefs.autoApplyCodecFix &&
+            app.prefs.selectedVariant.experimental &&
+            !app.prefs.skipCompatibilityCheck
+        ) {
+            app.prefs.autoApplyCodecFix = false
+            cancelAutoApplyIfUnused()
+            codecAutoApplyDisabled = true
+        }
+        _state.update {
+            it.copy(
+                advancedFixEnabled = enabled,
+                autoApplyCodecFix = if (codecAutoApplyDisabled) false else it.autoApplyCodecFix,
+                status = if (codecAutoApplyDisabled) {
+                    text(R.string.auto_disabled_for_experimental, it.selectedVariant.title)
+                } else {
+                    text(
+                        if (enabled) {
+                            R.string.advanced_fix_enabled
+                        } else {
+                            R.string.advanced_fix_disabled
+                        }
+                    )
+                }
+            )
+        }
+        if (enabled && app.prefs.adbEnabled) refreshCurrentVariant()
+    }
+
     fun selectVariant(variant: HevcCodecFixVariant) {
         app.prefs.selectedVariant = variant
-        var autoApplyDisabled = false
-        if (variant.experimental && app.prefs.autoApply && !app.prefs.skipCompatibilityCheck) {
-            app.prefs.autoApply = false
-            AutoApplyScheduler.cancel(app)
-            autoApplyDisabled = true
+        var codecAutoApplyDisabled = false
+        if (
+            variant.experimental &&
+            app.prefs.autoApplyCodecFix &&
+            !app.prefs.skipCompatibilityCheck
+        ) {
+            app.prefs.autoApplyCodecFix = false
+            cancelAutoApplyIfUnused()
+            codecAutoApplyDisabled = true
         }
         _state.update {
             it.copy(
                 selectedVariant = variant,
-                autoApply = if (autoApplyDisabled) false else it.autoApply,
-                status = if (autoApplyDisabled) {
+                autoApplyCodecFix = if (codecAutoApplyDisabled) false else it.autoApplyCodecFix,
+                status = if (codecAutoApplyDisabled) {
                     text(R.string.auto_disabled_for_experimental, variant.title)
                 } else {
                     it.status
@@ -101,67 +138,114 @@ class CodecFixViewModel(
         }
     }
 
-    fun setAutoApply(enabled: Boolean) {
+    fun setAutoApplyCodecFix(enabled: Boolean) {
         viewModelScope.launch {
             val current = _state.value
             if (enabled && !current.adbEnabled) {
-                _state.update { it.copy(autoApply = false, status = text(R.string.enable_adb_first)) }
+                _state.update {
+                    it.copy(autoApplyCodecFix = false, status = text(R.string.enable_adb_first))
+                }
                 return@launch
             }
-            if (enabled && current.selectedVariant.experimental && !current.skipCompatibilityCheck) {
+            val targetVariant = current.effectiveAutoApplyVariant
+            if (enabled && targetVariant.experimental && !current.skipCompatibilityCheck) {
                 _state.update {
                     it.copy(
-                        autoApply = false,
-                        status = text(R.string.auto_requires_unsafe, current.selectedVariant.title)
+                        autoApplyCodecFix = false,
+                        status = text(R.string.auto_requires_unsafe, targetVariant.title)
                     )
                 }
                 return@launch
             }
 
-            if (enabled && !current.skipCompatibilityCheck) {
+            if (
+                enabled &&
+                targetVariant != HevcCodecFixVariant.DEFAULT &&
+                !current.skipCompatibilityCheck
+            ) {
                 _state.update { it.copy(isBusy = true, status = text(R.string.checking_compatibility)) }
                 val compatibility = app.codecFixRepository.checkCompatibility()
                 if (!compatibility.autoApplyAllowed) {
                     val status = compatibility.output.trim().takeLast(STATUS_TEXT_LIMIT)
                         .ifBlank { text(R.string.auto_unavailable) }
-                    app.prefs.autoApply = false
+                    app.prefs.autoApplyCodecFix = false
                     notifyError(text(R.string.error_title_auto_unavailable), status)
-                    _state.update { it.copy(autoApply = false, isBusy = false, status = status) }
+                    _state.update {
+                        it.copy(autoApplyCodecFix = false, isBusy = false, status = status)
+                    }
                     return@launch
                 }
             }
 
-            app.prefs.autoApply = enabled
+            app.prefs.autoApplyCodecFix = enabled
             app.prefs.autoApplyRetryCount = 0
-            if (!enabled) AutoApplyScheduler.cancel(app)
+            if (!enabled) cancelAutoApplyIfUnused()
             _state.update {
                 it.copy(
-                    autoApply = enabled,
+                    autoApplyCodecFix = enabled,
                     isBusy = false,
                     status = if (enabled) {
-                        text(R.string.auto_enabled_for, it.selectedVariant.title)
+                        text(R.string.auto_enabled_for, it.effectiveAutoApplyVariant.title)
                     } else {
-                        text(R.string.auto_disabled)
+                        text(R.string.auto_codecfix_disabled)
                     }
                 )
             }
         }
     }
 
+    fun setAutoApplyMediaFix(enabled: Boolean) {
+        val current = _state.value
+        if (enabled && !current.adbEnabled) {
+            _state.update {
+                it.copy(autoApplyMediaFix = false, status = text(R.string.enable_adb_first))
+            }
+            return
+        }
+
+        app.prefs.autoApplyMediaFix = enabled
+        app.prefs.autoApplyRetryCount = 0
+        if (!enabled) cancelAutoApplyIfUnused()
+        _state.update {
+            it.copy(
+                autoApplyMediaFix = enabled,
+                status = text(
+                    if (enabled) {
+                        R.string.auto_mediafix_enabled
+                    } else {
+                        R.string.auto_mediafix_disabled
+                    }
+                )
+            )
+        }
+    }
+
+    fun setAutoApplyDelay(text: String) {
+        val sanitized = text.filter(Char::isDigit).take(4)
+        _state.update { it.copy(autoApplyDelayText = sanitized) }
+        val seconds = AutoApplyDelay.parse(sanitized) ?: return
+        app.prefs.autoApplyDelaySeconds = seconds
+    }
+
     fun setSkipCompatibilityCheck(enabled: Boolean) {
         app.prefs.skipCompatibilityCheck = enabled
-        var autoApplyDisabled = false
-        if (!enabled && app.prefs.autoApply && app.prefs.selectedVariant.experimental) {
-            app.prefs.autoApply = false
-            AutoApplyScheduler.cancel(app)
-            autoApplyDisabled = true
+        var codecAutoApplyDisabled = false
+        if (
+            !enabled &&
+            app.prefs.advancedFixEnabled &&
+            app.prefs.autoApplyCodecFix &&
+            app.prefs.selectedVariant.experimental
+        ) {
+            app.prefs.autoApplyCodecFix = false
+            cancelAutoApplyIfUnused()
+            codecAutoApplyDisabled = true
         }
         _state.update {
             it.copy(
                 skipCompatibilityCheck = enabled,
-                autoApply = if (autoApplyDisabled) false else it.autoApply,
+                autoApplyCodecFix = if (codecAutoApplyDisabled) false else it.autoApplyCodecFix,
                 status = when {
-                    autoApplyDisabled -> text(R.string.unsafe_disabled_auto_disabled)
+                    codecAutoApplyDisabled -> text(R.string.unsafe_disabled_auto_disabled)
                     enabled -> text(R.string.unsafe_enabled)
                     else -> text(R.string.compatibility_enabled)
                 }
@@ -306,11 +390,20 @@ class CodecFixViewModel(
             adbEnabled = prefs.adbEnabled,
             adbHostText = prefs.adbHost,
             adbPortText = prefs.adbPort.toString(),
-            autoApply = prefs.autoApply,
+            advancedFixEnabled = prefs.advancedFixEnabled,
+            autoApplyCodecFix = prefs.autoApplyCodecFix,
+            autoApplyMediaFix = prefs.autoApplyMediaFix,
+            autoApplyDelayText = prefs.autoApplyDelaySeconds.toString(),
             skipCompatibilityCheck = prefs.skipCompatibilityCheck,
             errorNotificationsEnabled = prefs.errorNotificationsEnabled,
             selectedVariant = prefs.selectedVariant
         )
+    }
+
+    private fun cancelAutoApplyIfUnused() {
+        if (!app.prefs.autoApplyCodecFix && !app.prefs.autoApplyMediaFix) {
+            AutoApplyScheduler.cancel(app)
+        }
     }
 
     private fun collectAvailableCodecs(): List<AvailableCodec> {
@@ -360,7 +453,10 @@ data class CodecFixScreenState(
     val adbEnabled: Boolean = false,
     val adbHostText: String = "localhost",
     val adbPortText: String = "5555",
-    val autoApply: Boolean = false,
+    val advancedFixEnabled: Boolean = true,
+    val autoApplyCodecFix: Boolean = false,
+    val autoApplyMediaFix: Boolean = false,
+    val autoApplyDelayText: String = AutoApplyDelay.DEFAULT_SECONDS.toString(),
     val skipCompatibilityCheck: Boolean = false,
     val errorNotificationsEnabled: Boolean = false,
     val selectedVariant: HevcCodecFixVariant = HevcCodecFixVariant.DEFAULT,
@@ -375,7 +471,13 @@ data class CodecFixScreenState(
     val connectionState: AdbConnectionState = AdbConnectionState.Disconnected,
     val isBusy: Boolean = false,
     val status: String? = null
-)
+) {
+    val effectiveAutoApplyVariant: HevcCodecFixVariant
+        get() = if (advancedFixEnabled) selectedVariant else HevcCodecFixVariant.MIN
+
+    val isAutoApplyDelayValid: Boolean
+        get() = AutoApplyDelay.parse(autoApplyDelayText) != null
+}
 
 data class AvailableCodec(
     val name: String,

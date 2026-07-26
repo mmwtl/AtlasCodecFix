@@ -16,10 +16,12 @@ task: ADB connection setup, profile selection, manual quick apply, and optional 
 - Serializes profile operations process-wide inside the application.
 - Provides a read-only diagnostic report with root, platform, file, preflight, and profile data.
 - Shows the current Android codec list with hardware/software and audio/video filters.
-- Schedules auto-apply after boot and app update as a unique persisted job with bounded retries.
+- Lets codecfix and MediaWidget restart be selected independently for automatic execution.
+- Schedules selected actions after a configurable boot delay as a unique persisted job with bounded
+  retries.
 - Can show ADB/preflight/apply errors as Android notifications.
-
-- Provides a separate quick launcher, `Codec Profiles`, for applying a profile from a small popup.
+- Provides a separate quick launcher, `Codec Fix`: in advanced mode it opens the profile popup; in
+  simple mode it alternates `Min` and `Default`, then restarts MediaWidget.
 - Keeps the main app focused on ADB settings and auto-apply configuration.
 
 Preflight is deliberately small: it verifies root access, the five expected msmnile vendor files,
@@ -54,8 +56,12 @@ When a profile is applied, the app:
 9. Restarts media codec services only after a complete apply or explicit restore.
 
 The fix is runtime-only because it uses bind mounts. After reboot Android loses these mounts. A
-small non-exported receiver schedules a persisted job after `BOOT_COMPLETED`; the job waits for ADB,
-retries transient failures up to five times, and re-applies the selected profile when allowed.
+small non-exported receiver schedules a persisted job after `BOOT_COMPLETED`; the job waits for the
+configured delay and ADB, retries transient failures up to five times, and executes the selected
+codecfix/mediafix actions in that order.
+
+`mediafix` runs through the same bounded ADB/root command path as codecfix. It resolves all current
+PIDs for `com.geely.mediawidget`, sends `SIGKILL`, and treats an already stopped process as success.
 
 ## Requirements
 
@@ -76,15 +82,19 @@ the profile is restored or the device is rebooted.
 5. Tap `Подключить`.
 6. Use `Запустить preflight` for the compatibility check or `Диагностика` for the complete read-only
    device report.
-7. Select the profile for auto-apply.
-8. Enable `Применять после загрузки` if the fix should be restored automatically after boot.
-9. Tap `Посмотреть кодеки` to rebuild and view the current codec list.
-10. Enable `Небезопасный режим` only if the compatibility guard blocks a known-good target. This is
+7. Enable `Расширенный фикс` to choose profiles manually and from the quick popup. Disable it to
+   make the quick launcher alternate `Min`/`Default`; auto codecfix also uses `Min` in this mode.
+8. Select the profile for auto-apply when advanced mode is enabled.
+9. Enable `Codecfix после загрузки`, `Mediafix после загрузки`, or both, and set the boot delay.
+10. Tap `Посмотреть кодеки` to rebuild and view the current codec list.
+11. Enable `Небезопасный режим` only if the compatibility guard blocks a known-good target. This is
    also the explicit override required for automatic application of experimental profiles.
-11. Enable `Ошибки уведомлениями` if errors should also appear as Android notifications.
+12. Enable `Ошибки уведомлениями` if errors should also appear as Android notifications.
 
-For one-off manual activation, open the separate launcher entry `Codec Profiles` and choose the
-profile to apply. Tapping outside the popup closes it.
+For one-off manual activation in advanced mode, open `Codec Fix` and choose a profile or run
+Mediafix directly. Tapping outside the popup closes it. In simple mode the launcher has no menu: it
+detects the active profile, applies `Min` unless `Min` is already active (then restores `Default`),
+and runs Mediafix last. Mediafix is not run if codecfix/restore fails.
 
 ## Project Structure
 
@@ -98,7 +108,7 @@ app/src/main/java/com/mmwtl/atlascodecfix/
   HevcCodecFixRepository.kt    Profile staging, apply, and detection logic
   HevcCodecFixVariant.kt       Profile definitions
   MainActivity.kt              Main settings UI
-  QuickApplyActivity.kt        Popup UI for manual profile activation
+  QuickApplyActivity.kt        Advanced popup and simple one-tap Min/Default toggle
   AutoApplyReceiver.kt         Validates boot/update broadcasts and schedules work
   AutoApplyJobService.kt       Bounded background auto-apply execution
   AutoApplyScheduler.kt        Unique persisted JobScheduler registration

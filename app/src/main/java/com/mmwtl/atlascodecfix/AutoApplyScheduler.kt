@@ -9,12 +9,14 @@ import android.util.Log
 object AutoApplyScheduler {
     fun sync(
         context: Context,
-        resetRetries: Boolean = false,
-        initialDelayMs: Long = DEFAULT_INITIAL_DELAY_MS
+        resetRetries: Boolean = false
     ): Boolean {
         val app = context.applicationContext as CodecFixApp
-        return if (app.prefs.autoApply && app.prefs.adbEnabled) {
-            schedule(context, resetRetries, initialDelayMs)
+        return if (
+            (app.prefs.autoApplyCodecFix || app.prefs.autoApplyMediaFix) &&
+            app.prefs.adbEnabled
+        ) {
+            schedule(context, resetRetries)
         } else {
             cancel(context)
             true
@@ -23,11 +25,11 @@ object AutoApplyScheduler {
 
     fun schedule(
         context: Context,
-        resetRetries: Boolean = false,
-        initialDelayMs: Long = DEFAULT_INITIAL_DELAY_MS
+        resetRetries: Boolean = false
     ): Boolean {
         val app = context.applicationContext as CodecFixApp
         if (resetRetries) app.prefs.autoApplyRetryCount = 0
+        val initialDelayMs = AutoApplyDelay.toMilliseconds(app.prefs.autoApplyDelaySeconds)
 
         val scheduler = context.getSystemService(JobScheduler::class.java)
         val job = JobInfo.Builder(
@@ -52,6 +54,5 @@ object AutoApplyScheduler {
 
     private const val TAG = "AtlasCodecFix"
     private const val JOB_ID = 0x41544346
-    private const val DEFAULT_INITIAL_DELAY_MS = 12_000L
     private const val RETRY_BACKOFF_MS = 30_000L
 }

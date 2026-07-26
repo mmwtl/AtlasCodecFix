@@ -35,7 +35,10 @@ class AutoApplyJobService : JobService() {
         runningJob?.cancel()
         runningJob = null
         val prefs = currentApp().prefs
-        if (!prefs.autoApply || !prefs.adbEnabled) {
+        if (
+            (!prefs.autoApplyCodecFix && !prefs.autoApplyMediaFix) ||
+            !prefs.adbEnabled
+        ) {
             prefs.autoApplyRetryCount = 0
             return false
         }
@@ -57,7 +60,10 @@ class AutoApplyJobService : JobService() {
     private suspend fun performAutoApply(): Boolean {
         val app = currentApp()
         val prefs = app.prefs
-        if (!prefs.autoApply || !prefs.adbEnabled) {
+        if (
+            (!prefs.autoApplyCodecFix && !prefs.autoApplyMediaFix) ||
+            !prefs.adbEnabled
+        ) {
             prefs.autoApplyRetryCount = 0
             return false
         }
@@ -66,36 +72,33 @@ class AutoApplyJobService : JobService() {
             return retryOrStop(getString(R.string.auto_apply_connect_failed))
         }
 
-        val current = app.codecFixRepository.detectCurrentVariant()
-        if (!current.commandSuccess) {
-            return retryOrStop(current.output.ifBlank { getString(R.string.auto_apply_detect_failed) })
+        val targetVariant = if (prefs.advancedFixEnabled) {
+            prefs.selectedVariant
+        } else {
+            HevcCodecFixVariant.MIN
         }
-        if (current.variant == prefs.selectedVariant) {
-            prefs.autoApplyRetryCount = 0
-            Log.i(TAG, "Auto apply skipped, already ${prefs.selectedVariant.argument}")
-            return false
-        }
-
-        val skipCompatibilityCheck = prefs.skipCompatibilityCheck
-        val result = app.codecFixRepository.applyVariant(
-            variant = prefs.selectedVariant,
-            allowRisky = false,
-            skipCompatibilityCheck = skipCompatibilityCheck,
-            allowExperimental = skipCompatibilityCheck,
-            requireAutoApplyAllowed = true
+        val result = app.codecFixRepository.runAutoApply(
+            AutoApplyRequest(
+                applyCodecFix = prefs.autoApplyCodecFix,
+                applyMediaFix = prefs.autoApplyMediaFix,
+                variant = targetVariant,
+                skipCompatibilityCheck = prefs.skipCompatibilityCheck
+            )
         )
         if (result.success) {
             prefs.autoApplyRetryCount = 0
-            Log.i(TAG, "Auto apply ${prefs.selectedVariant.argument}: success")
+            Log.i(
+                TAG,
+                "Auto apply codec=${prefs.autoApplyCodecFix}:${targetVariant.argument}, " +
+                    "media=${prefs.autoApplyMediaFix}: success"
+            )
             return false
         }
 
-        val message = listOf(result.runOutput, result.detectOutput, result.recoveryOutput)
-            .filter(String::isNotBlank)
-            .joinToString("\n")
+        val message = result.output
             .trim()
             .takeLast(ERROR_TEXT_LIMIT)
-            .ifBlank { getString(R.string.auto_apply_failed_for, prefs.selectedVariant.title) }
+            .ifBlank { getString(R.string.auto_apply_failed) }
         return if (result.retryable) {
             retryOrStop(message)
         } else {

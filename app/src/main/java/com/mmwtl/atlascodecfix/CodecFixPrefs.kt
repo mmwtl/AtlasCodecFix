@@ -21,9 +21,25 @@ class CodecFixPrefs(context: Context) {
             ?: DEFAULT_ADB_HOST
         set(value) = prefs.edit { putString(KEY_ADB_HOST, value.trim().ifEmpty { DEFAULT_ADB_HOST }) }
 
-    var autoApply: Boolean
+    var autoApplyCodecFix: Boolean
         get() = prefs.getBoolean(KEY_AUTO_APPLY, false)
         set(value) = prefs.edit { putBoolean(KEY_AUTO_APPLY, value) }
+
+    var autoApplyMediaFix: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_APPLY_MEDIA_FIX, false)
+        set(value) = prefs.edit { putBoolean(KEY_AUTO_APPLY_MEDIA_FIX, value) }
+
+    var autoApplyDelaySeconds: Int
+        get() = AutoApplyDelay.normalize(
+            prefs.getInt(KEY_AUTO_APPLY_DELAY_SECONDS, AutoApplyDelay.DEFAULT_SECONDS)
+        )
+        set(value) = prefs.edit {
+            putInt(KEY_AUTO_APPLY_DELAY_SECONDS, AutoApplyDelay.normalize(value))
+        }
+
+    var advancedFixEnabled: Boolean
+        get() = prefs.getBoolean(KEY_ADVANCED_FIX_ENABLED, true)
+        set(value) = prefs.edit { putBoolean(KEY_ADVANCED_FIX_ENABLED, value) }
 
     var skipCompatibilityCheck: Boolean
         get() = prefs.getBoolean(KEY_SKIP_COMPATIBILITY_CHECK, false)
@@ -47,6 +63,9 @@ class CodecFixPrefs(context: Context) {
         private const val KEY_ADB_HOST = "adb_host"
         private const val KEY_ADB_PORT = "adb_port"
         private const val KEY_AUTO_APPLY = "auto_apply"
+        private const val KEY_AUTO_APPLY_MEDIA_FIX = "auto_apply_media_fix"
+        private const val KEY_AUTO_APPLY_DELAY_SECONDS = "auto_apply_delay_seconds"
+        private const val KEY_ADVANCED_FIX_ENABLED = "advanced_fix_enabled"
         private const val KEY_SKIP_COMPATIBILITY_CHECK = "skip_compatibility_check"
         private const val KEY_ERROR_NOTIFICATIONS_ENABLED = "error_notifications_enabled"
         private const val KEY_SELECTED_VARIANT = "selected_variant"

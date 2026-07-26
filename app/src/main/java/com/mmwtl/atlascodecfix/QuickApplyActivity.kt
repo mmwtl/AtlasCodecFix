@@ -1,6 +1,8 @@
 package com.mmwtl.atlascodecfix
 
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -50,6 +52,13 @@ class QuickApplyActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         screenState = screenState.copy(selectedVariant = appContainer.prefs.selectedVariant)
+        if (!appContainer.prefs.advancedFixEnabled) {
+            setFinishOnTouchOutside(false)
+            window.setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
+            window.setDimAmount(0f)
+            runSimpleToggle()
+            return
+        }
 
         setContent {
             AtlasCodecFixTheme {
@@ -57,6 +66,7 @@ class QuickApplyActivity : ComponentActivity() {
                     state = screenState,
                     onDismiss = ::finish,
                     onApply = ::requestApply,
+                    onMediaFix = ::runMediaFix,
                     onPreflight = ::runPreflight,
                     onDiagnostics = ::runDiagnostics,
                     onConfirmApply = ::confirmApply,
@@ -66,6 +76,53 @@ class QuickApplyActivity : ComponentActivity() {
         }
 
         refreshCurrentVariant()
+    }
+
+    private fun runSimpleToggle() {
+        lifecycleScope.launch {
+            if (!appContainer.prefs.adbEnabled) {
+                val status = getString(R.string.adb_disabled_message)
+                notifyError(getString(R.string.error_title_adb_disabled), status)
+                showToastAndFinish(status)
+                return@launch
+            }
+
+            val result = withContext(Dispatchers.IO) {
+                appContainer.codecFixRepository.runSimpleToggle(
+                    skipCompatibilityCheck = appContainer.prefs.skipCompatibilityCheck
+                )
+            }
+
+            val status = when {
+                result.success -> getString(
+                    R.string.quick_toggle_succeeded,
+                    result.targetVariant?.title.orEmpty()
+                )
+                result.codecFixResult == null -> result.detectOutput.trim().takeLast(STATUS_TEXT_LIMIT)
+                    .ifBlank { getString(R.string.check_not_completed) }
+                result.codecFixResult.success && result.mediaFixResult?.success == false ->
+                    getString(
+                        R.string.mediafix_failed_after_codecfix,
+                        result.targetVariant?.title.orEmpty(),
+                        result.mediaFixResult.output.trim().takeLast(STATUS_TEXT_LIMIT)
+                    )
+                else -> listOf(
+                    result.codecFixResult.runOutput,
+                    result.codecFixResult.detectOutput,
+                    result.codecFixResult.recoveryOutput
+                )
+                    .filter(String::isNotBlank)
+                    .joinToString("\n")
+                    .trim()
+                    .takeLast(STATUS_TEXT_LIMIT)
+                    .ifBlank { getString(R.string.apply_failed) }
+            }
+
+            if (!result.success) {
+                notifyError(getString(R.string.error_title_quick_fix), status)
+            }
+            showToastAndFinish(status)
+        }
     }
 
     private fun refreshCurrentVariant() {
@@ -172,6 +229,35 @@ class QuickApplyActivity : ComponentActivity() {
         }
     }
 
+    private fun runMediaFix() {
+        lifecycleScope.launch {
+            if (!appContainer.prefs.adbEnabled) {
+                val status = getString(R.string.adb_disabled_message)
+                notifyError(getString(R.string.error_title_adb_disabled), status)
+                screenState = screenState.copy(status = status)
+                return@launch
+            }
+
+            screenState = screenState.copy(
+                isBusy = true,
+                status = getString(R.string.running_mediafix)
+            )
+            val result = withContext(Dispatchers.IO) {
+                appContainer.codecFixRepository.runMediaFix()
+            }
+            val status = if (result.success) {
+                getString(R.string.mediafix_succeeded)
+            } else {
+                result.output.trim().takeLast(STATUS_TEXT_LIMIT)
+                    .ifBlank { getString(R.string.mediafix_failed) }
+            }
+            if (!result.success) {
+                notifyError(getString(R.string.error_title_mediafix), status)
+            }
+            screenState = screenState.copy(isBusy = false, status = status)
+        }
+    }
+
     private fun confirmApply() {
         val confirmation = screenState.confirmation ?: return
         screenState = screenState.copy(confirmation = null)
@@ -260,9 +346,15 @@ class QuickApplyActivity : ComponentActivity() {
         appContainer.errorNotifier.notify(title, message)
     }
 
+    private fun showToastAndFinish(message: String) {
+        Toast.makeText(applicationContext, message, Toast.LENGTH_LONG).show()
+        finish()
+    }
+
     private companion object {
         private const val PREFLIGHT_REPORT_LIMIT = 2_000
         private const val DIAGNOSTICS_REPORT_LIMIT = 6_000
+        private const val STATUS_TEXT_LIMIT = 260
     }
 }
 
@@ -289,6 +381,7 @@ private fun QuickApplyScreen(
     state: QuickApplyState,
     onDismiss: () -> Unit,
     onApply: (HevcCodecFixVariant) -> Unit,
+    onMediaFix: () -> Unit,
     onPreflight: () -> Unit,
     onDiagnostics: () -> Unit,
     onConfirmApply: () -> Unit,
@@ -347,6 +440,15 @@ private fun QuickApplyScreen(
                     enabled = !state.isBusy,
                     onClick = { onApply(variant) }
                 )
+            }
+
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !state.isBusy,
+                shape = RoundedCornerShape(8.dp),
+                onClick = onMediaFix
+            ) {
+                Text(stringResource(R.string.action_mediafix))
             }
 
             OutlinedButton(
