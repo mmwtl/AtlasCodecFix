@@ -2,6 +2,8 @@
     <string name="app_name">Atlas Codec Fix</string>
     <string name="quick_apply_name">Codec Fix</string>
     <string name="notification_channel_errors">Ошибки Codec Fix</string>
+    <string name="notification_channel_manual_apply">Результаты применения Codec Fix</string>
+    <string name="manual_apply_notification_title">Codec Fix</string>
 
     <string name="variant_msmnile_description">Стандартный профиль msmnile</string>
     <string name="variant_direwolf_description">Применить штатные Direwolf-конфиги — экспериментально</string>
@@ -92,7 +94,9 @@
     <string name="error_title_fix_check">Проверка фикса</string>
     <string name="error_title_profile_check">Проверка профиля</string>
     <string name="applying_variant">Применяю %1$s</string>
-    <string name="applied_variant">Применено: %1$s</string>
+    <string name="manual_profile_applied">Профиль применён: %1$s</string>
+    <string name="manual_default_restored">Восстановлен штатный профиль: %1$s</string>
+    <string name="manual_apply_rolled_back">Не удалось применить %1$s. Восстановлен штатный профиль Default.</string>
     <string name="apply_failed">Не удалось применить профиль</string>
     <string name="automatic_restore_succeeded">Профиль не подтверждён. Default автоматически восстановлен.</string>
     <string name="error_title_apply_failed">Не удалось применить %1$s</string>
@@ -121,11 +125,11 @@
     <string name="codec_decoder">decoder</string>
 
     <string name="quick_title">Профиль кодеков</string>
-    <string name="quick_toggle_succeeded">%1$s применён; Mediafix выполнен</string>
+    <string name="quick_toggle_succeeded">%1$s. Mediafix выполнен</string>
     <string name="running_mediafix">Перезапускаю MediaWidget</string>
     <string name="mediafix_succeeded">Mediafix выполнен</string>
     <string name="mediafix_failed">Не удалось выполнить Mediafix</string>
-    <string name="mediafix_failed_after_codecfix">%1$s применён, но Mediafix завершился ошибкой: %2$s</string>
+    <string name="mediafix_failed_after_codecfix">%1$s, но Mediafix завершился ошибкой: %2$s</string>
     <string name="error_title_mediafix">Mediafix</string>
     <string name="experimental_warning_short">%1$s использует возможности других платформ</string>
     <string name="risk_confirmation_title">Подтвердите риск</string>

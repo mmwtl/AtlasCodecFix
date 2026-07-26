@@ -11,6 +11,8 @@ class CodecFixApp : Application() {
         private set
     lateinit var errorNotifier: ErrorNotifier
         private set
+    lateinit var manualApplyNotifier: ManualApplyNotifier
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -18,5 +20,6 @@ class CodecFixApp : Application() {
         adbClient = AdbClient(this, prefs)
         codecFixRepository = HevcCodecFixRepository(this, adbClient)
         errorNotifier = ErrorNotifier(this, prefs)
+        manualApplyNotifier = ManualApplyNotifier(this)
     }
 }

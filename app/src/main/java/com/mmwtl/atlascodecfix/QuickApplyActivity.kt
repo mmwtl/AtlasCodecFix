@@ -1,10 +1,14 @@
 package com.mmwtl.atlascodecfix
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.drawable.ColorDrawable
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -47,6 +51,17 @@ class QuickApplyActivity : ComponentActivity() {
         get() = application as CodecFixApp
 
     private var screenState by mutableStateOf(QuickApplyState())
+    private var pendingManualNotification: PendingManualNotification? = null
+    private val notificationPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val pending = pendingManualNotification ?: return@registerForActivityResult
+        pendingManualNotification = null
+        if (granted) {
+            appContainer.manualApplyNotifier.notify(pending.message)
+        }
+        if (pending.finishAfterNotification) finish()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -93,17 +108,20 @@ class QuickApplyActivity : ComponentActivity() {
                 )
             }
 
+            val targetVariant = result.targetVariant
             val status = when {
-                result.success -> getString(
+                result.success && targetVariant != null -> getString(
                     R.string.quick_toggle_succeeded,
-                    result.targetVariant?.title.orEmpty()
+                    manualApplyStatus(targetVariant)
                 )
                 result.codecFixResult == null -> result.detectOutput.trim().takeLast(STATUS_TEXT_LIMIT)
                     .ifBlank { getString(R.string.check_not_completed) }
-                result.codecFixResult.success && result.mediaFixResult?.success == false ->
+                result.codecFixResult.success &&
+                    result.mediaFixResult?.success == false &&
+                    targetVariant != null ->
                     getString(
                         R.string.mediafix_failed_after_codecfix,
-                        result.targetVariant?.title.orEmpty(),
+                        manualApplyStatus(targetVariant),
                         result.mediaFixResult.output.trim().takeLast(STATUS_TEXT_LIMIT)
                     )
                 else -> listOf(
@@ -121,7 +139,18 @@ class QuickApplyActivity : ComponentActivity() {
             if (!result.success) {
                 notifyError(getString(R.string.error_title_quick_fix), status)
             }
-            showToastAndFinish(status)
+            val manualOutcome = when {
+                result.codecFixResult?.success == true -> status
+                result.codecFixResult?.restoredToDefault == true && targetVariant != null ->
+                    getString(R.string.manual_apply_rolled_back, targetVariant.title)
+                else -> null
+            }
+            showToast(status)
+            if (manualOutcome == null) {
+                finish()
+            } else {
+                postManualApplyNotification(manualOutcome, finishAfterNotification = true)
+            }
         }
     }
 
@@ -314,31 +343,38 @@ class QuickApplyActivity : ComponentActivity() {
 
             if (result.success) appContainer.prefs.selectedVariant = variant
 
+            val status = if (result.success) {
+                manualApplyStatus(variant)
+            } else {
+                val failureStatus = listOf(
+                    result.runOutput,
+                    result.detectOutput,
+                    if (result.restoredToDefault) {
+                        getString(R.string.automatic_restore_succeeded)
+                    } else {
+                        result.recoveryOutput
+                    }
+                )
+                    .filter(String::isNotBlank)
+                    .joinToString("\n")
+                    .trim()
+                    .takeLast(260)
+                    .ifBlank { getString(R.string.apply_failed) }
+                notifyError(getString(R.string.error_title_apply_failed, variant.title), failureStatus)
+                failureStatus
+            }
+
             screenState = screenState.copy(
                 selectedVariant = if (result.success) variant else appContainer.prefs.selectedVariant,
                 currentVariant = result.detectedVariant,
                 isBusy = false,
-                status = if (result.success) {
-                    getString(R.string.applied_variant, variant.title)
-                } else {
-                    val status = listOf(
-                        result.runOutput,
-                        result.detectOutput,
-                        if (result.restoredToDefault) {
-                            getString(R.string.automatic_restore_succeeded)
-                        } else {
-                            result.recoveryOutput
-                        }
-                    )
-                        .filter(String::isNotBlank)
-                        .joinToString("\n")
-                        .trim()
-                        .takeLast(260)
-                        .ifBlank { getString(R.string.apply_failed) }
-                    notifyError(getString(R.string.error_title_apply_failed, variant.title), status)
-                    status
-                }
+                status = status
             )
+            when {
+                result.success -> postManualApplyNotification(status)
+                result.restoredToDefault ->
+                    postManualApplyNotification(getString(R.string.manual_apply_rolled_back, variant.title))
+            }
         }
     }
 
@@ -346,8 +382,36 @@ class QuickApplyActivity : ComponentActivity() {
         appContainer.errorNotifier.notify(title, message)
     }
 
-    private fun showToastAndFinish(message: String) {
+    private fun manualApplyStatus(variant: HevcCodecFixVariant): String {
+        return if (variant == HevcCodecFixVariant.DEFAULT) {
+            getString(R.string.manual_default_restored, variant.title)
+        } else {
+            getString(R.string.manual_profile_applied, variant.title)
+        }
+    }
+
+    private fun postManualApplyNotification(
+        message: String,
+        finishAfterNotification: Boolean = false
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingManualNotification = PendingManualNotification(message, finishAfterNotification)
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+
+        appContainer.manualApplyNotifier.notify(message)
+        if (finishAfterNotification) finish()
+    }
+
+    private fun showToast(message: String) {
         Toast.makeText(applicationContext, message, Toast.LENGTH_LONG).show()
+    }
+
+    private fun showToastAndFinish(message: String) {
+        showToast(message)
         finish()
     }
 
@@ -357,6 +421,11 @@ class QuickApplyActivity : ComponentActivity() {
         private const val STATUS_TEXT_LIMIT = 260
     }
 }
+
+private data class PendingManualNotification(
+    val message: String,
+    val finishAfterNotification: Boolean
+)
 
 private data class QuickApplyState(
     val selectedVariant: HevcCodecFixVariant = HevcCodecFixVariant.DEFAULT,
