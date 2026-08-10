@@ -34,5 +34,7 @@ private val appColors = darkColorScheme(
     onSurface = Color(0xFFF5F5F5),
     surfaceVariant = Color(0xFF333333),
     onSurfaceVariant = Color(0xFFD4D4D4),
-    outline = Color(0xFF737373)
+    outline = Color(0xFF737373),
+    error = Color(0xFFD98282),
+    onError = Color(0xFF171717)
 )

@@ -10,6 +10,7 @@ trap 'rm -rf "$TMP_ROOT"' 0 HUP INT TERM
 BIN_DIR="$TMP_ROOT/bin"
 STATE_DIR="$TMP_ROOT/state"
 STATE_FILE="$STATE_DIR/mounts"
+PIDOF_LOG="$STATE_DIR/pidof.log"
 VENDOR_DIR="$TMP_ROOT/vendor/etc"
 BASE_DIR="$TMP_ROOT/hevc"
 mkdir -p \
@@ -19,6 +20,7 @@ mkdir -p \
     "$BASE_DIR/min" \
     "$BASE_DIR/max"
 : > "$STATE_FILE"
+: > "$PIDOF_LOG"
 
 cat > "$BIN_DIR/mount" <<'EOF'
 #!/bin/sh
@@ -81,6 +83,7 @@ EOF
 
 cat > "$BIN_DIR/pidof" <<'EOF'
 #!/bin/sh
+printf '%s\n' "${1:-}" >> "$PIDOF_LOG"
 exit 1
 EOF
 
@@ -137,7 +140,7 @@ performance=media_codecs_performance_max.xml
 EOF
 
 export PATH="$BIN_DIR:$PATH"
-export STATE_DIR STATE_FILE
+export STATE_DIR STATE_FILE PIDOF_LOG
 export HEVC_BASE_DIR="$BASE_DIR"
 export HEVC_VENDOR_ETC="$VENDOR_DIR"
 export HEVC_MOUNT_TABLE="$STATE_FILE"
@@ -150,6 +153,15 @@ assert_contains() {
         echo "Expected '$needle' in $file" >&2
         exit 1
     }
+}
+
+assert_not_contains() {
+    needle="$1"
+    file="$2"
+    if grep -F "$needle" "$file" >/dev/null; then
+        echo "Did not expect '$needle' in $file" >&2
+        exit 1
+    fi
 }
 
 assert_file_text() {
@@ -168,6 +180,10 @@ assert_contains 'variant:min' "$TMP_ROOT/min.out"
 assert_file_text 'min-codecs c2.qti.hevc' "$TARGET_CODECS"
 assert_file_text 'stock-performance' "$TARGET_PERFORMANCE"
 [ "$(wc -l < "$STATE_FILE" | tr -d ' ')" = "1" ]
+assert_contains 'media.hwcodec' "$PIDOF_LOG"
+assert_contains 'mediaserver' "$PIDOF_LOG"
+assert_not_contains 'media.swcodec' "$PIDOF_LOG"
+assert_not_contains 'media.codec' "$PIDOF_LOG"
 
 sh "$HEVC_DIR/detect.sh" > "$TMP_ROOT/detect-min.out"
 assert_contains 'variant:min' "$TMP_ROOT/detect-min.out"

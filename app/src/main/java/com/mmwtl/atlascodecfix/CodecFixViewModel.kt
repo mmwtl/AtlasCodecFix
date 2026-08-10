@@ -28,7 +28,7 @@ class CodecFixViewModel(
         }
         if (app.prefs.adbEnabled) {
             connectAdb()
-            if (app.prefs.advancedFixEnabled) refreshCurrentVariant()
+            refreshCurrentVariant()
         }
     }
 
@@ -78,39 +78,6 @@ class CodecFixViewModel(
             app.adbClient.disconnect()
             _state.update { it.copy(status = text(R.string.adb_disconnected)) }
         }
-    }
-
-    fun setAdvancedFixEnabled(enabled: Boolean) {
-        app.prefs.advancedFixEnabled = enabled
-        var codecAutoApplyDisabled = false
-        if (
-            enabled &&
-            app.prefs.autoApplyCodecFix &&
-            app.prefs.selectedVariant.experimental &&
-            !app.prefs.skipCompatibilityCheck
-        ) {
-            app.prefs.autoApplyCodecFix = false
-            cancelAutoApplyIfUnused()
-            codecAutoApplyDisabled = true
-        }
-        _state.update {
-            it.copy(
-                advancedFixEnabled = enabled,
-                autoApplyCodecFix = if (codecAutoApplyDisabled) false else it.autoApplyCodecFix,
-                status = if (codecAutoApplyDisabled) {
-                    text(R.string.auto_disabled_for_experimental, it.selectedVariant.title)
-                } else {
-                    text(
-                        if (enabled) {
-                            R.string.advanced_fix_enabled
-                        } else {
-                            R.string.advanced_fix_disabled
-                        }
-                    )
-                }
-            )
-        }
-        if (enabled && app.prefs.adbEnabled) refreshCurrentVariant()
     }
 
     fun selectVariant(variant: HevcCodecFixVariant) {
@@ -194,32 +161,6 @@ class CodecFixViewModel(
         }
     }
 
-    fun setAutoApplyMediaFix(enabled: Boolean) {
-        val current = _state.value
-        if (enabled && !current.adbEnabled) {
-            _state.update {
-                it.copy(autoApplyMediaFix = false, status = text(R.string.enable_adb_first))
-            }
-            return
-        }
-
-        app.prefs.autoApplyMediaFix = enabled
-        app.prefs.autoApplyRetryCount = 0
-        if (!enabled) cancelAutoApplyIfUnused()
-        _state.update {
-            it.copy(
-                autoApplyMediaFix = enabled,
-                status = text(
-                    if (enabled) {
-                        R.string.auto_mediafix_enabled
-                    } else {
-                        R.string.auto_mediafix_disabled
-                    }
-                )
-            )
-        }
-    }
-
     fun setAutoApplyDelay(text: String) {
         val sanitized = text.filter(Char::isDigit).take(4)
         _state.update { it.copy(autoApplyDelayText = sanitized) }
@@ -232,7 +173,6 @@ class CodecFixViewModel(
         var codecAutoApplyDisabled = false
         if (
             !enabled &&
-            app.prefs.advancedFixEnabled &&
             app.prefs.autoApplyCodecFix &&
             app.prefs.selectedVariant.experimental
         ) {
@@ -303,6 +243,43 @@ class CodecFixViewModel(
                 )
             }
         }
+    }
+
+    fun requestApplySelectedVariant() {
+        val current = _state.value
+        if (!current.adbEnabled) {
+            _state.update { it.copy(status = text(R.string.adb_disabled_message)) }
+            return
+        }
+        val variant = current.selectedVariant
+        if (variant.experimental && !current.skipCompatibilityCheck) {
+            _state.update {
+                it.copy(
+                    confirmation = ApplyConfirmation(variant, ConfirmationReason.EXPERIMENTAL),
+                    status = text(R.string.experimental_warning_short, variant.title)
+                )
+            }
+            return
+        }
+        applyVariant(
+            variant = variant,
+            allowRisky = current.skipCompatibilityCheck,
+            allowExperimental = current.skipCompatibilityCheck
+        )
+    }
+
+    fun confirmApply() {
+        val confirmation = _state.value.confirmation ?: return
+        _state.update { it.copy(confirmation = null) }
+        applyVariant(
+            variant = confirmation.variant,
+            allowRisky = true,
+            allowExperimental = true
+        )
+    }
+
+    fun dismissApplyConfirmation() {
+        _state.update { it.copy(confirmation = null) }
     }
 
     fun runPreflightCheck() {
@@ -390,9 +367,7 @@ class CodecFixViewModel(
             adbEnabled = prefs.adbEnabled,
             adbHostText = prefs.adbHost,
             adbPortText = prefs.adbPort.toString(),
-            advancedFixEnabled = prefs.advancedFixEnabled,
             autoApplyCodecFix = prefs.autoApplyCodecFix,
-            autoApplyMediaFix = prefs.autoApplyMediaFix,
             autoApplyDelayText = prefs.autoApplyDelaySeconds.toString(),
             skipCompatibilityCheck = prefs.skipCompatibilityCheck,
             errorNotificationsEnabled = prefs.errorNotificationsEnabled,
@@ -401,8 +376,86 @@ class CodecFixViewModel(
     }
 
     private fun cancelAutoApplyIfUnused() {
-        if (!app.prefs.autoApplyCodecFix && !app.prefs.autoApplyMediaFix) {
+        if (!app.prefs.autoApplyCodecFix) {
             AutoApplyScheduler.cancel(app)
+        }
+    }
+
+    private fun applyVariant(
+        variant: HevcCodecFixVariant,
+        allowRisky: Boolean,
+        allowExperimental: Boolean
+    ) {
+        viewModelScope.launch {
+            _state.update {
+                it.copy(isBusy = true, status = text(R.string.applying_variant, variant.title))
+            }
+            val result = app.codecFixRepository.applyVariant(
+                variant = variant,
+                allowRisky = allowRisky,
+                skipCompatibilityCheck = app.prefs.skipCompatibilityCheck,
+                allowExperimental = allowExperimental
+            )
+
+            if (!result.success &&
+                !allowRisky &&
+                result.compatibility?.status == HevcCodecFixCompatibilityStatus.RISKY
+            ) {
+                _state.update {
+                    it.copy(
+                        isBusy = false,
+                        confirmation = ApplyConfirmation(variant, ConfirmationReason.RISKY),
+                        status = result.compatibility.reason
+                            ?: text(R.string.compatibility_not_confirmed)
+                    )
+                }
+                return@launch
+            }
+
+            if (result.success) app.prefs.selectedVariant = variant
+            val status = if (result.success) {
+                manualApplyStatus(variant)
+            } else {
+                listOf(
+                    result.runOutput,
+                    result.detectOutput,
+                    if (result.restoredToDefault) {
+                        text(R.string.automatic_restore_succeeded)
+                    } else {
+                        result.recoveryOutput
+                    }
+                )
+                    .filter(String::isNotBlank)
+                    .joinToString("\n")
+                    .trim()
+                    .takeLast(STATUS_TEXT_LIMIT)
+                    .ifBlank { text(R.string.apply_failed) }
+            }
+
+            if (!result.success) {
+                notifyError(text(R.string.error_title_apply_failed, variant.title), status)
+            }
+            _state.update {
+                it.copy(
+                    currentVariant = result.detectedVariant,
+                    isBusy = false,
+                    status = status
+                )
+            }
+            when {
+                result.success -> app.manualApplyNotifier.notify(status)
+                result.restoredToDefault -> app.manualApplyNotifier.notify(
+                    text(R.string.manual_apply_rolled_back, variant.title)
+                )
+            }
+        }
+    }
+
+    private fun manualApplyStatus(variant: HevcCodecFixVariant): String {
+        return if (variant == HevcCodecFixVariant.DEFAULT) {
+            text(R.string.manual_default_restored, variant.title)
+        } else {
+            text(R.string.manual_profile_applied, variant.title)
         }
     }
 
@@ -453,9 +506,7 @@ data class CodecFixScreenState(
     val adbEnabled: Boolean = false,
     val adbHostText: String = "localhost",
     val adbPortText: String = "5555",
-    val advancedFixEnabled: Boolean = true,
     val autoApplyCodecFix: Boolean = false,
-    val autoApplyMediaFix: Boolean = false,
     val autoApplyDelayText: String = AutoApplyDelay.DEFAULT_SECONDS.toString(),
     val skipCompatibilityCheck: Boolean = false,
     val errorNotificationsEnabled: Boolean = false,
@@ -470,13 +521,24 @@ data class CodecFixScreenState(
     val showVideoCodecs: Boolean = true,
     val connectionState: AdbConnectionState = AdbConnectionState.Disconnected,
     val isBusy: Boolean = false,
-    val status: String? = null
+    val status: String? = null,
+    val confirmation: ApplyConfirmation? = null
 ) {
     val effectiveAutoApplyVariant: HevcCodecFixVariant
-        get() = if (advancedFixEnabled) selectedVariant else HevcCodecFixVariant.MIN
+        get() = selectedVariant
 
     val isAutoApplyDelayValid: Boolean
         get() = AutoApplyDelay.parse(autoApplyDelayText) != null
+}
+
+data class ApplyConfirmation(
+    val variant: HevcCodecFixVariant,
+    val reason: ConfirmationReason
+)
+
+enum class ConfirmationReason {
+    EXPERIMENTAL,
+    RISKY
 }
 
 data class AvailableCodec(

@@ -57,11 +57,8 @@ When a profile is applied, the app:
 
 The fix is runtime-only because it uses bind mounts. After reboot Android loses these mounts. A
 small non-exported receiver schedules a persisted job after `BOOT_COMPLETED`; the job waits for the
-configured delay and ADB, retries transient failures up to five times, and executes the selected
-codecfix/mediafix actions in that order.
-
-`mediafix` runs through the same bounded ADB/root command path as codecfix. It resolves all current
-PIDs for `com.geely.mediawidget`, sends `SIGKILL`, and treats an already stopped process as success.
+configured delay and ADB, retries transient failures up to five times, and applies the selected
+codec profile.
 
 ## Requirements
 
@@ -82,19 +79,12 @@ the profile is restored or the device is rebooted.
 5. Tap `Подключить`.
 6. Use `Запустить preflight` for the compatibility check or `Диагностика` for the complete read-only
    device report.
-7. Enable `Расширенный фикс` to choose profiles manually and from the quick popup. Disable it to
-   make the quick launcher alternate `Min`/`Default`; auto codecfix also uses `Min` in this mode.
-8. Select the profile for auto-apply when advanced mode is enabled.
-9. Enable `Codecfix после загрузки`, `Mediafix после загрузки`, or both, and set the boot delay.
-10. Tap `Посмотреть кодеки` to rebuild and view the current codec list.
-11. Enable `Небезопасный режим` only if the compatibility guard blocks a known-good target. This is
+7. Select a profile and tap `Применить` for one-off activation.
+8. Enable `Codecfix после загрузки` and set the boot delay for automatic application.
+9. Tap `Посмотреть кодеки` to rebuild and view the current codec list.
+10. Enable `Небезопасный режим` only if the compatibility guard blocks a known-good target. This is
    also the explicit override required for automatic application of experimental profiles.
-12. Enable `Ошибки уведомлениями` if errors should also appear as Android notifications.
-
-For one-off manual activation in advanced mode, open `Codec Fix` and choose a profile or run
-Mediafix directly. Tapping outside the popup closes it. In simple mode the launcher has no menu: it
-detects the active profile, applies `Min` unless `Min` is already active (then restores `Default`),
-and runs Mediafix last. Mediafix is not run if codecfix/restore fails.
+11. Enable `Ошибки уведомлениями` if errors should also appear as Android notifications.
 
 ## Project Structure
 
@@ -107,8 +97,7 @@ app/src/main/java/com/mmwtl/atlascodecfix/
   CodecFixViewModel.kt         Main-screen state and actions
   HevcCodecFixRepository.kt    Profile staging, apply, and detection logic
   HevcCodecFixVariant.kt       Profile definitions
-  MainActivity.kt              Main settings UI
-  QuickApplyActivity.kt        Advanced popup and simple one-tap Min/Default toggle
+  MainActivity.kt              Main settings and manual profile application UI
   AutoApplyReceiver.kt         Validates boot/update broadcasts and schedules work
   AutoApplyJobService.kt       Bounded background auto-apply execution
   AutoApplyScheduler.kt        Unique persisted JobScheduler registration

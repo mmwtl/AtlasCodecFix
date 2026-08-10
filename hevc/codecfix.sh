@@ -60,9 +60,7 @@ kill_if_running() {
 }
 
 restart_media() {
-    kill_if_running media.swcodec
     kill_if_running media.hwcodec
-    kill_if_running media.codec
     kill_if_running mediaserver
 }
 

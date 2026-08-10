@@ -103,60 +103,33 @@ class HevcCodecFixRepository internal constructor(
             }
         }
 
-    suspend fun runMediaFix(): MediaFixResult = withContext(Dispatchers.IO) {
-        operationMutex.withLock { runMediaFixLocked() }
-    }
-
-    suspend fun runSimpleToggle(skipCompatibilityCheck: Boolean): SimpleFixResult =
-        withContext(Dispatchers.IO) {
-            operationMutex.withLock {
-                val detected = detectCurrentVariantLocked()
-                if (!detected.commandSuccess || detected.variant == null) {
-                    return@withLock SimpleFixResult(
-                        initialVariant = detected.variant,
-                        targetVariant = null,
-                        detectOutput = detected.output,
-                        codecFixResult = null,
-                        mediaFixResult = null
-                    )
-                }
-
-                val target = if (detected.variant == HevcCodecFixVariant.MIN) {
-                    HevcCodecFixVariant.DEFAULT
-                } else {
-                    HevcCodecFixVariant.MIN
-                }
-                val codecResult = applyVariantLocked(
-                    variant = target,
-                    allowRisky = false,
-                    skipCompatibilityCheck = skipCompatibilityCheck,
-                    allowExperimental = false,
-                    requireAutoApplyAllowed = false
-                )
-                val mediaResult = if (codecResult.success) runMediaFixLocked() else null
-
-                SimpleFixResult(
-                    initialVariant = detected.variant,
-                    targetVariant = target,
-                    detectOutput = detected.output,
-                    codecFixResult = codecResult,
-                    mediaFixResult = mediaResult
-                )
-            }
-        }
-
     suspend fun runAutoApply(request: AutoApplyRequest): AutoApplyResult =
         withContext(Dispatchers.IO) {
             operationMutex.withLock {
-                if (!request.applyCodecFix && !request.applyMediaFix) {
-                    return@withLock AutoApplyResult(success = true)
-                }
-
                 var codecResult: HevcCodecFixApplyResult? = null
                 var codecSkipped = false
                 var detectOutput = ""
-                if (request.applyCodecFix) {
-                    if (request.variant == HevcCodecFixVariant.DEFAULT) {
+                if (request.variant == HevcCodecFixVariant.DEFAULT) {
+                    codecResult = applyVariantLocked(
+                        variant = request.variant,
+                        allowRisky = false,
+                        skipCompatibilityCheck = request.skipCompatibilityCheck,
+                        allowExperimental = request.skipCompatibilityCheck,
+                        requireAutoApplyAllowed = true
+                    )
+                } else {
+                    val detected = detectCurrentVariantLocked()
+                    detectOutput = detected.output
+                    if (!detected.commandSuccess) {
+                        return@withLock AutoApplyResult(
+                            success = false,
+                            retryable = true,
+                            detectOutput = detected.output
+                        )
+                    }
+                    if (detected.variant == request.variant) {
+                        codecSkipped = true
+                    } else {
                         codecResult = applyVariantLocked(
                             variant = request.variant,
                             allowRisky = false,
@@ -164,47 +137,23 @@ class HevcCodecFixRepository internal constructor(
                             allowExperimental = request.skipCompatibilityCheck,
                             requireAutoApplyAllowed = true
                         )
-                    } else {
-                        val detected = detectCurrentVariantLocked()
-                        detectOutput = detected.output
-                        if (!detected.commandSuccess) {
-                            return@withLock AutoApplyResult(
-                                success = false,
-                                retryable = true,
-                                detectOutput = detected.output
-                            )
-                        }
-                        if (detected.variant == request.variant) {
-                            codecSkipped = true
-                        } else {
-                            codecResult = applyVariantLocked(
-                                variant = request.variant,
-                                allowRisky = false,
-                                skipCompatibilityCheck = request.skipCompatibilityCheck,
-                                allowExperimental = request.skipCompatibilityCheck,
-                                requireAutoApplyAllowed = true
-                            )
-                        }
-                    }
-
-                    if (codecResult?.success == false) {
-                        return@withLock AutoApplyResult(
-                            success = false,
-                            retryable = codecResult.retryable,
-                            detectOutput = detectOutput,
-                            codecFixResult = codecResult
-                        )
                     }
                 }
 
-                val mediaResult = if (request.applyMediaFix) runMediaFixLocked() else null
+                if (codecResult?.success == false) {
+                    return@withLock AutoApplyResult(
+                        success = false,
+                        retryable = codecResult.retryable,
+                        detectOutput = detectOutput,
+                        codecFixResult = codecResult
+                    )
+                }
+
                 AutoApplyResult(
-                    success = mediaResult?.success != false,
-                    retryable = mediaResult?.retryable == true,
+                    success = true,
                     codecFixSkipped = codecSkipped,
                     detectOutput = detectOutput,
-                    codecFixResult = codecResult,
-                    mediaFixResult = mediaResult
+                    codecFixResult = codecResult
                 )
             }
         }
@@ -289,15 +238,6 @@ class HevcCodecFixRepository internal constructor(
             success = success,
             compatibility = compatibility,
             retryable = runResult.failure != null || !detected.commandSuccess
-        )
-    }
-
-    private suspend fun runMediaFixLocked(): MediaFixResult {
-        val result = executeCatching(buildMediaFixCommand(), MEDIA_FIX_TIMEOUT_MS)
-        return MediaFixResult(
-            success = result.succeeded,
-            output = result.displayOutput,
-            retryable = result.failure != null
         )
     }
 
@@ -440,33 +380,6 @@ class HevcCodecFixRepository internal constructor(
         return "su root sh -c ${script.shellQuote()}"
     }
 
-    private fun buildMediaFixCommand(): String {
-        val script = """
-            PID_LIST="${'$'}(pidof com.geely.mediawidget 2>/dev/null)"
-            PIDOF_STATUS="${'$'}?"
-            if [ "${'$'}PIDOF_STATUS" -gt 1 ]; then
-                echo "status:error"
-                echo "reason:pidof_failed:${'$'}PIDOF_STATUS"
-                exit "${'$'}PIDOF_STATUS"
-            fi
-            if [ -z "${'$'}PID_LIST" ]; then
-                echo "status:ok"
-                echo "mediawidget:not_running"
-                exit 0
-            fi
-            kill -9 ${'$'}PID_LIST
-            KILL_STATUS="${'$'}?"
-            if [ "${'$'}KILL_STATUS" -ne 0 ]; then
-                echo "status:error"
-                echo "reason:kill_failed:${'$'}KILL_STATUS"
-                exit "${'$'}KILL_STATUS"
-            fi
-            echo "status:ok"
-            echo "mediawidget:killed:${'$'}PID_LIST"
-        """.trimIndent()
-        return "su root sh -c ${script.shellQuote()}"
-    }
-
     private fun readAssetText(assetPath: String): String {
         return assets.readText(assetPath)
     }
@@ -533,7 +446,6 @@ class HevcCodecFixRepository internal constructor(
         private const val PREFLIGHT_TIMEOUT_MS = 45_000L
         private const val DETECT_TIMEOUT_MS = 12_000L
         private const val DIAGNOSTICS_IDENTITY_TIMEOUT_MS = 12_000L
-        private const val MEDIA_FIX_TIMEOUT_MS = 12_000L
         private const val APPLY_TIMEOUT_MS = 60_000L
     }
 }
@@ -595,31 +507,7 @@ data class HevcCodecFixApplyResult(
     val restoredToDefault: Boolean = false
 )
 
-data class MediaFixResult(
-    val success: Boolean,
-    val output: String,
-    val retryable: Boolean = false
-)
-
-data class SimpleFixResult(
-    val initialVariant: HevcCodecFixVariant?,
-    val targetVariant: HevcCodecFixVariant?,
-    val detectOutput: String,
-    val codecFixResult: HevcCodecFixApplyResult?,
-    val mediaFixResult: MediaFixResult?
-) {
-    val success: Boolean
-        get() = codecFixResult?.success == true && mediaFixResult?.success == true
-
-    val retryable: Boolean
-        get() = codecFixResult?.retryable == true ||
-            mediaFixResult?.retryable == true ||
-            codecFixResult == null
-}
-
 data class AutoApplyRequest(
-    val applyCodecFix: Boolean,
-    val applyMediaFix: Boolean,
     val variant: HevcCodecFixVariant,
     val skipCompatibilityCheck: Boolean
 )
@@ -629,15 +517,13 @@ data class AutoApplyResult(
     val retryable: Boolean = false,
     val codecFixSkipped: Boolean = false,
     val detectOutput: String = "",
-    val codecFixResult: HevcCodecFixApplyResult? = null,
-    val mediaFixResult: MediaFixResult? = null
+    val codecFixResult: HevcCodecFixApplyResult? = null
 ) {
     val output: String
         get() = listOf(
             detectOutput,
             codecFixResult?.runOutput.orEmpty(),
             codecFixResult?.detectOutput.orEmpty(),
-            codecFixResult?.recoveryOutput.orEmpty(),
-            mediaFixResult?.output.orEmpty()
+            codecFixResult?.recoveryOutput.orEmpty()
         ).filter(String::isNotBlank).joinToString("\n")
 }

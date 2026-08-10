@@ -1,6 +1,5 @@
 <resources>
     <string name="app_name">Atlas Codec Fix</string>
-    <string name="quick_apply_name">Codec Fix</string>
     <string name="notification_channel_errors">Ошибки Codec Fix</string>
     <string name="notification_channel_manual_apply">Результаты применения Codec Fix</string>
     <string name="manual_apply_notification_title">Codec Fix</string>
@@ -23,24 +22,15 @@
     <string name="action_check">Проверить</string>
     <string name="action_run_preflight">Запустить preflight</string>
     <string name="action_run_diagnostics">Диагностика</string>
-    <string name="action_mediafix">Mediafix: перезапустить MediaWidget</string>
     <string name="action_apply">Применить</string>
     <string name="action_cancel">Отмена</string>
 
-    <string name="section_fix_mode">Режим фикса</string>
-    <string name="advanced_fix">Расширенный фикс</string>
-    <string name="advanced_fix_description">Включено: ярлык открывает выбор профиля. Выключено: ярлык переключает Min/Default и затем выполняет Mediafix.</string>
-    <string name="advanced_fix_enabled">Расширенный фикс включён</string>
-    <string name="advanced_fix_disabled">Быстрый режим включён: ярлык переключает Min/Default</string>
-    <string name="section_auto_profile">Профиль автоприменения</string>
+    <string name="section_profile">Профиль кодеков</string>
     <string name="current_variant">Текущий вариант: %1$s</string>
     <string name="variant_unknown">не определён</string>
     <string name="section_auto_apply">Автоприменение</string>
     <string name="auto_codecfix">Codecfix после загрузки</string>
-    <string name="auto_mediafix">Mediafix после загрузки</string>
-    <string name="auto_mediafix_description">Завершить com.geely.mediawidget после codecfix или самостоятельно</string>
     <string name="selected_auto_variant">Будет использован выбранный вариант: %1$s</string>
-    <string name="fixed_auto_variant">В обычном режиме всегда используется: %1$s</string>
     <string name="auto_apply_delay">Задержка после загрузки, секунд</string>
     <string name="auto_apply_delay_description">От 0 до 3600 секунд; применяется при следующей загрузке системы</string>
     <string name="auto_apply_delay_invalid">Введите число от 0 до 3600</string>
@@ -74,8 +64,6 @@
     <string name="error_title_auto_unavailable">Автоприменение недоступно</string>
     <string name="auto_enabled_for">Автоприменение включено для %1$s</string>
     <string name="auto_codecfix_disabled">Автоприменение codecfix выключено</string>
-    <string name="auto_mediafix_enabled">Автоприменение mediafix включено</string>
-    <string name="auto_mediafix_disabled">Автоприменение mediafix выключено</string>
     <string name="auto_apply_connect_failed">Не удалось подключиться к ADB для автоприменения</string>
     <string name="auto_apply_failed">Не удалось выполнить выбранные автодействия</string>
     <string name="auto_apply_stopped">Автоприменение остановлено после %1$d попыток: %2$s</string>
@@ -100,7 +88,6 @@
     <string name="apply_failed">Не удалось применить профиль</string>
     <string name="automatic_restore_succeeded">Профиль не подтверждён. Default автоматически восстановлен.</string>
     <string name="error_title_apply_failed">Не удалось применить %1$s</string>
-    <string name="error_title_quick_fix">Быстрый Codec Fix</string>
     <string name="compatibility_not_confirmed">Совместимость устройства не подтверждена</string>
     <string name="experimental_confirmation_required">Экспериментальный профиль %1$s требует явного подтверждения</string>
 
@@ -124,13 +111,6 @@
     <string name="codec_encoder">encoder</string>
     <string name="codec_decoder">decoder</string>
 
-    <string name="quick_title">Профиль кодеков</string>
-    <string name="quick_toggle_succeeded">%1$s. Mediafix выполнен</string>
-    <string name="running_mediafix">Перезапускаю MediaWidget</string>
-    <string name="mediafix_succeeded">Mediafix выполнен</string>
-    <string name="mediafix_failed">Не удалось выполнить Mediafix</string>
-    <string name="mediafix_failed_after_codecfix">%1$s, но Mediafix завершился ошибкой: %2$s</string>
-    <string name="error_title_mediafix">Mediafix</string>
     <string name="experimental_warning_short">%1$s использует возможности других платформ</string>
     <string name="risk_confirmation_title">Подтвердите риск</string>
     <string name="experimental_warning">%1$s содержит возможности и camera-профили других платформ. Неподдерживаемые режимы могут нарушить работу медиа или камеры.</string>

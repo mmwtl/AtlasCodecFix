@@ -27,30 +27,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".QuickApplyActivity"
-            android:excludeFromRecents="true"
-            android:exported="false"
-            android:finishOnTaskLaunch="true"
-            android:launchMode="singleTask"
-            android:noHistory="true"
-            android:taskAffinity="com.mmwtl.atlascodecfix.quick"
-            android:theme="@style/Theme.AtlasCodecFix.Popup" />
-
-        <activity-alias
-            android:name=".QuickApplyLauncher"
-            android:enabled="true"
-            android:exported="true"
-            android:icon="@mipmap/ic_launcher"
-            android:label="@string/quick_apply_name"
-            android:roundIcon="@mipmap/ic_launcher_round"
-            android:targetActivity=".QuickApplyActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
         <receiver
             android:name=".AutoApplyReceiver"
             android:enabled="true"

@@ -13,8 +13,7 @@ object AutoApplyScheduler {
     ): Boolean {
         val app = context.applicationContext as CodecFixApp
         return if (
-            (app.prefs.autoApplyCodecFix || app.prefs.autoApplyMediaFix) &&
-            app.prefs.adbEnabled
+            app.prefs.autoApplyCodecFix && app.prefs.adbEnabled
         ) {
             schedule(context, resetRetries)
         } else {

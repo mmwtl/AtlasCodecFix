@@ -19,11 +19,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
@@ -34,13 +37,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -70,13 +73,12 @@ class MainActivity : ComponentActivity() {
                     onPortChange = viewModel::setAdbPort,
                     onConnect = viewModel::connectAdb,
                     onDisconnect = viewModel::disconnectAdb,
-                    onAdvancedFixChange = viewModel::setAdvancedFixEnabled,
                     onVariantSelected = viewModel::selectVariant,
+                    onApply = viewModel::requestApplySelectedVariant,
                     onRefresh = viewModel::refreshCurrentVariant,
                     onPreflight = viewModel::runPreflightCheck,
                     onDiagnostics = viewModel::runDiagnostics,
                     onAutoApplyCodecFixChange = viewModel::setAutoApplyCodecFix,
-                    onAutoApplyMediaFixChange = viewModel::setAutoApplyMediaFix,
                     onAutoApplyDelayChange = viewModel::setAutoApplyDelay,
                     onSkipCompatibilityCheckChange = viewModel::setSkipCompatibilityCheck,
                     onLoadCodecs = viewModel::loadAvailableCodecs,
@@ -84,7 +86,9 @@ class MainActivity : ComponentActivity() {
                     onCodecSoftwareChange = viewModel::setCodecSoftwareFilter,
                     onCodecAudioChange = viewModel::setCodecAudioFilter,
                     onCodecVideoChange = viewModel::setCodecVideoFilter,
-                    onErrorNotificationsChange = ::setErrorNotificationsEnabled
+                    onErrorNotificationsChange = ::setErrorNotificationsEnabled,
+                    onConfirmApply = viewModel::confirmApply,
+                    onDismissConfirmation = viewModel::dismissApplyConfirmation
                 )
             }
         }
@@ -110,13 +114,12 @@ private fun CodecFixScreen(
     onPortChange: (String) -> Unit,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
-    onAdvancedFixChange: (Boolean) -> Unit,
     onVariantSelected: (HevcCodecFixVariant) -> Unit,
+    onApply: () -> Unit,
     onRefresh: () -> Unit,
     onPreflight: () -> Unit,
     onDiagnostics: () -> Unit,
     onAutoApplyCodecFixChange: (Boolean) -> Unit,
-    onAutoApplyMediaFixChange: (Boolean) -> Unit,
     onAutoApplyDelayChange: (String) -> Unit,
     onSkipCompatibilityCheckChange: (Boolean) -> Unit,
     onLoadCodecs: () -> Unit,
@@ -124,45 +127,58 @@ private fun CodecFixScreen(
     onCodecSoftwareChange: (Boolean) -> Unit,
     onCodecAudioChange: (Boolean) -> Unit,
     onCodecVideoChange: (Boolean) -> Unit,
-    onErrorNotificationsChange: (Boolean) -> Unit
+    onErrorNotificationsChange: (Boolean) -> Unit,
+    onConfirmApply: () -> Unit,
+    onDismissConfirmation: () -> Unit
 ) {
+    state.confirmation?.let { confirmation ->
+        AlertDialog(
+            onDismissRequest = onDismissConfirmation,
+            title = { Text(stringResource(R.string.risk_confirmation_title)) },
+            text = {
+                Text(
+                    stringResource(
+                        if (confirmation.reason == ConfirmationReason.EXPERIMENTAL) {
+                            R.string.experimental_warning
+                        } else {
+                            R.string.risky_warning
+                        },
+                        confirmation.variant.title
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = onConfirmApply) {
+                    Text(stringResource(R.string.action_apply))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissConfirmation) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(8.dp)
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+            .windowInsetsPadding(WindowInsets.safeDrawing)
             .verticalScroll(rememberScrollState())
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(horizontal = 24.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
             text = stringResource(R.string.app_name),
             color = MaterialTheme.colorScheme.onBackground,
-            fontSize = 28.sp,
-            fontWeight = FontWeight.SemiBold
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold
         )
 
         StatusHeader(state)
-
-        Section(title = stringResource(R.string.section_fix_mode)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.advanced_fix), fontWeight = FontWeight.Medium)
-                    Text(
-                        text = stringResource(R.string.advanced_fix_description),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                RectSwitch(
-                    checked = state.advancedFixEnabled,
-                    enabled = !state.isBusy,
-                    onCheckedChange = onAdvancedFixChange
-                )
-            }
-        }
 
         Section(title = stringResource(R.string.section_adb)) {
             Row(
@@ -210,6 +226,7 @@ private fun CodecFixScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
                     enabled = state.adbEnabled && !state.isBusy,
+                    colors = atlasButtonColors(),
                     shape = RoundedCornerShape(8.dp),
                     onClick = onConnect
                 ) {
@@ -241,9 +258,8 @@ private fun CodecFixScreen(
             }
         }
 
-        if (state.advancedFixEnabled) {
-            Section(title = stringResource(R.string.section_auto_profile)) {
-                Text(
+        Section(title = stringResource(R.string.section_profile)) {
+            Text(
                     text = stringResource(
                         R.string.current_variant,
                         state.currentVariant?.title ?: stringResource(R.string.variant_unknown)
@@ -251,34 +267,41 @@ private fun CodecFixScreen(
                     fontWeight = FontWeight.Medium
                 )
 
-                HevcCodecFixVariant.USER_VISIBLE.forEachIndexed { index, variant ->
-                    if (index > 0 && variant.experimental &&
-                        !HevcCodecFixVariant.USER_VISIBLE[index - 1].experimental
-                    ) {
-                        HorizontalDivider()
-                        Text(
-                            text = stringResource(R.string.experimental_profiles_separator),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                    VariantButton(
-                        variant = variant,
-                        selected = state.selectedVariant == variant,
-                        enabled = !state.isBusy,
-                        onClick = { onVariantSelected(variant) }
+            HevcCodecFixVariant.USER_VISIBLE.forEachIndexed { index, variant ->
+                if (index > 0 && variant.experimental &&
+                    !HevcCodecFixVariant.USER_VISIBLE[index - 1].experimental
+                ) {
+                    HorizontalDivider()
+                    Text(
+                        text = stringResource(R.string.experimental_profiles_separator),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
                     )
                 }
+                VariantButton(
+                    variant = variant,
+                    selected = state.selectedVariant == variant,
+                    enabled = !state.isBusy,
+                    onClick = { onVariantSelected(variant) }
+                )
+            }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedButton(
-                        enabled = state.adbEnabled && !state.isBusy,
-                        shape = RoundedCornerShape(8.dp),
-                        onClick = onRefresh
-                    ) {
-                        Text(stringResource(R.string.action_check))
-                    }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    enabled = state.adbEnabled && !state.isBusy,
+                    colors = atlasButtonColors(),
+                    shape = RoundedCornerShape(8.dp),
+                    onClick = onApply
+                ) {
+                    Text(stringResource(R.string.action_apply))
+                }
+                OutlinedButton(
+                    enabled = state.adbEnabled && !state.isBusy,
+                    shape = RoundedCornerShape(8.dp),
+                    onClick = onRefresh
+                ) {
+                    Text(stringResource(R.string.action_check))
                 }
             }
         }
@@ -293,11 +316,7 @@ private fun CodecFixScreen(
                     Text(stringResource(R.string.auto_codecfix), fontWeight = FontWeight.Medium)
                     Text(
                         text = stringResource(
-                            if (state.advancedFixEnabled) {
-                                R.string.selected_auto_variant
-                            } else {
-                                R.string.fixed_auto_variant
-                            },
+                            R.string.selected_auto_variant,
                             state.effectiveAutoApplyVariant.title
                         ),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -307,25 +326,6 @@ private fun CodecFixScreen(
                     checked = state.autoApplyCodecFix,
                     enabled = (state.adbEnabled || state.autoApplyCodecFix) && !state.isBusy,
                     onCheckedChange = onAutoApplyCodecFixChange
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.auto_mediafix), fontWeight = FontWeight.Medium)
-                    Text(
-                        text = stringResource(R.string.auto_mediafix_description),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                RectSwitch(
-                    checked = state.autoApplyMediaFix,
-                    enabled = (state.adbEnabled || state.autoApplyMediaFix) && !state.isBusy,
-                    onCheckedChange = onAutoApplyMediaFixChange
                 )
             }
 
@@ -404,8 +404,10 @@ private fun CodecFixScreen(
 
         state.status?.takeIf { it.isNotBlank() }?.let { status ->
             ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp)
             ) {
                 Text(
                     modifier = Modifier.padding(14.dp),
@@ -420,10 +422,10 @@ private fun CodecFixScreen(
 @Composable
 private fun StatusHeader(state: CodecFixScreenState) {
     val (label, color) = when (val connection = state.connectionState) {
-        AdbConnectionState.Connected -> stringResource(R.string.adb_connected) to Color(0xFF22C55E)
-        AdbConnectionState.Connecting -> stringResource(R.string.adb_connecting) to Color(0xFFF59E0B)
-        AdbConnectionState.Disconnected -> stringResource(R.string.adb_disconnected) to Color(0xFF94A3B8)
-        is AdbConnectionState.Error -> stringResource(R.string.adb_error, connection.message) to Color(0xFFEF4444)
+        AdbConnectionState.Connected -> stringResource(R.string.adb_connected) to MaterialTheme.colorScheme.primary
+        AdbConnectionState.Connecting -> stringResource(R.string.adb_connecting) to MaterialTheme.colorScheme.onSurfaceVariant
+        AdbConnectionState.Disconnected -> stringResource(R.string.adb_disconnected) to MaterialTheme.colorScheme.outline
+        is AdbConnectionState.Error -> stringResource(R.string.adb_error, connection.message) to MaterialTheme.colorScheme.error
     }
 
     Row(
@@ -470,6 +472,7 @@ private fun CodecListSection(
         Button(
             modifier = Modifier.fillMaxWidth(),
             enabled = !state.isCodecListLoading,
+            colors = atlasButtonColors(),
             shape = RoundedCornerShape(8.dp),
             onClick = onLoadCodecs
         ) {
@@ -542,7 +545,8 @@ private fun CodecRow(codec: AvailableCodec) {
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp)
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
@@ -582,6 +586,12 @@ fun RectSwitch(
 }
 
 @Composable
+private fun atlasButtonColors() = ButtonDefaults.buttonColors(
+    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+    contentColor = MaterialTheme.colorScheme.onSurface
+)
+
+@Composable
 fun Section(
     title: String,
     content: @Composable ColumnScope.() -> Unit
@@ -589,13 +599,14 @@ fun Section(
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp)
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(text = title, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+            Text(text = title, fontWeight = FontWeight.Bold, fontSize = 20.sp)
             content()
         }
     }
