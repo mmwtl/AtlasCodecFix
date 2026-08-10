@@ -1,187 +1,139 @@
-# Atlas Codec Fix
+<p align="center">
+  <img src="app/src/main/res/drawable-nodpi/ic_launcher_foreground.png" width="160" alt="Иконка Atlas Codec Fix">
+</p>
 
-Standalone Android app for applying HEVC codec profile fixes on rooted Android head units.
+<h1 align="center">Atlas Codec Fix</h1>
 
-The project takes the codec-fix logic out of GInputBridge and keeps only the parts needed for this
-task: ADB connection setup, profile selection, manual quick apply, and optional auto-apply after boot.
+<p align="center">
+  Переключатель конфигураций медиакодеков для Android-головных устройств с root-доступом
+</p>
 
-## Features
+Atlas Codec Fix подключается к локальному `adbd`, проверяет совместимость устройства и через
+`su root` временно перекрывает выбранные файлы конфигурации в `/vendor/etc` точечными bind mount.
+Приложение предназначено прежде всего для устройств на платформе Qualcomm `msmnile` с ожидаемым
+набором vendor-файлов.
 
-- Connects to ADB over a configurable TCP host and port; `localhost:5555` remains the default.
-- Persists its private ADB key in no-backup app storage so authorization survives process restarts.
-- Runs a preflight compatibility check before applying a codec profile.
-- Allows bypassing the preflight compatibility check when manual override is enabled.
-- Applies codec/profile/spec configs through a root shell.
-- Enforces a real command deadline by closing the ADB transport when a command times out.
-- Serializes profile operations process-wide inside the application.
-- Provides a read-only diagnostic report with root, platform, file, preflight, and profile data.
-- Shows the current Android codec list with hardware/software and audio/video filters.
-- Lets codecfix and MediaWidget restart be selected independently for automatic execution.
-- Schedules selected actions after a configurable boot delay as a unique persisted job with bounded
-  retries.
-- Can show ADB/preflight/apply errors as Android notifications.
-- Provides a separate quick launcher, `Codec Fix`: in advanced mode it opens the profile popup; in
-  simple mode it alternates `Min` and `Default`, then restarts MediaWidget.
-- Keeps the main app focused on ADB settings and auto-apply configuration.
+> Приложение выполняет команды с root-правами. Неподходящая конфигурация может нарушить работу
+> видео, звука или камеры до возврата профиля `Default` либо перезагрузки устройства.
 
-Preflight is deliberately small: it verifies root access, the five expected msmnile vendor files,
-the QTI HEVC codec declaration, and `ro.board.platform` (falling back to `ro.soc.model`). An
-unknown platform is reported as `risky` for explicit manual confirmation, not as a hard block.
+## Возможности
 
-## Profiles
+- подключение к ADB по настраиваемым адресу и TCP-порту; значение по умолчанию —
+  `localhost:5555`;
+- сохранение ADB-ключа в приватном no-backup хранилище приложения;
+- отдельные preflight-проверка и диагностика устройства без изменения конфигурации;
+- ручное применение профиля с подтверждением риска для экспериментальных вариантов;
+- проверка каждого bind mount и автоматический возврат к штатной конфигурации при ошибке или
+  несовпадении определённого профиля;
+- безопасная операция `Default`, которая не зависит от preflight и файлов других профилей;
+- отложенное автоприменение после загрузки Android с ограниченным числом повторов;
+- просмотр доступных Android-кодеков с фильтрами по типу, назначению и аппаратному ускорению;
+- опциональные уведомления об ошибках ADB, preflight и применения.
 
-The UI exposes five user-facing profiles:
+## Профили
 
-| Profile | Description |
-| --- | --- |
-| `Default` | Unconditional recovery operation. Removes active bind mounts without running preflight or staging profile assets. |
-| `Direwolf` | Experimental application of the stock Direwolf vendor configuration over msmnile targets. |
-| `Min` | Standard config set with HEVC uncommented. |
-| `Max` | Experimental cross-device aggregate. Requires confirmation for manual apply and unsafe mode for auto-apply. |
-| `Ultra` | Experimental C2/QTI-first aggregate. Requires confirmation for manual apply and unsafe mode for auto-apply. |
+| Профиль | Назначение | Статус |
+| --- | --- | --- |
+| `Default` | Снимает активные bind mount и возвращает штатную конфигурацию `msmnile`. | Восстановление |
+| `Min` | Подменяет только `media_codecs_msmnile.xml` вариантом с активными объявлениями кодеков C2/QTI HEVC. | Основной |
+| `Direwolf` | Накладывает присутствующие на устройстве штатные Direwolf-конфиги на цели `msmnile`. | Экспериментальный |
+| `Max` | Применяет агрегированный набор codec, performance, media profile и video specs из нескольких платформ. | Экспериментальный |
+| `Ultra` | Применяет агрегированный C2/QTI-first набор codec, performance, media profile и video specs. | Экспериментальный |
 
-## How It Works
+Для ручного применения экспериментального профиля приложение всегда запрашивает явное
+подтверждение. Его автоприменение доступно только при включённом `Небезопасном режиме`, который
+также отключает preflight-защиту.
 
-When a profile is applied, the app:
+## Требования и совместимость
 
-1. Copies only the selected profile and root scripts from app assets into a temporary staging tree.
-2. Opens an ADB shell connection to `localhost:<port>`.
-3. Runs `preflight.sh` through `su root`, unless `Фикс без проверки` is enabled.
-4. Stops if the target is unsupported and the check is not bypassed.
-5. Through the root shell, atomically switches the staging tree into `/dev/hevc`.
-6. Bind-mounts only the files listed by the profile manifest.
-7. Verifies every mount and rolls the complete set back to stock if any mount fails.
-8. Detects the active profile before completing the root transaction; a mismatch triggers an
-   automatic `Default` restore.
-9. Restarts media codec services only after a complete apply or explicit restore.
+- Android 8.0 или новее (API 26+);
+- root-доступ с рабочей командой `su root`;
+- локальный демон ADB, доступный по TCP, обычно на `localhost:5555`;
+- подтверждение ADB-ключа приложения при первом подключении, если его запрашивает устройство;
+- для подтверждённого preflight — платформа `msmnile`, объявление кодека Qualcomm HEVC и файлы:
+  - `/vendor/etc/media_codecs_msmnile.xml`;
+  - `/vendor/etc/media_codecs_performance_msmnile.xml`;
+  - `/vendor/etc/media_profiles_msmnile.xml`;
+  - `/vendor/etc/video_system_specs.json`;
+  - `/vendor/etc/media_msmnile/video_system_specs.json`.
 
-The fix is runtime-only because it uses bind mounts. After reboot Android loses these mounts. A
-small non-exported receiver schedules a persisted job after `BOOT_COMPLETED`; the job waits for the
-configured delay and ADB, retries transient failures up to five times, and applies the selected
-codec profile.
+Если необходимые файлы или объявление кодека HEVC отсутствуют, preflight помечает устройство как
+неподдерживаемое. Другая платформа при наличии всех файлов получает статус `risky`: ручное
+применение можно подтвердить явно, но безопасное автоприменение не разрешается.
 
-## Requirements
+Прошивки автомобильных ГУ различаются составом vendor-конфигурации, реализацией `su`, политиками
+SELinux и поведением медиасервисов. Поэтому совместимость с конкретной моделью и версией прошивки
+нужно проверять на реальном устройстве. Профили `Direwolf`, `Max` и `Ultra` намеренно считаются
+экспериментальными.
 
-- Android 8.0+.
-- Root access with working `su`.
-- ADB daemon listening on a local TCP port, usually `5555`.
-- First ADB connection may require accepting the app's ADB key on the device.
+## Установка и применение
 
-This app is device/config specific. Applying wrong media codec configs can break media playback until
-the profile is restored or the device is rebooted.
+1. Установите подписанный APK Atlas Codec Fix на головное устройство.
+2. Убедитесь, что локальный `adbd` принимает TCP-подключения и устройству доступен `su root`.
+3. Откройте приложение и включите `ADB helper`.
+4. Укажите адрес и порт ADB — обычно `localhost` и `5555` — затем нажмите `Подключить`.
+5. Запустите `preflight` или откройте `Диагностика`, не изменяющую конфигурацию.
+6. Выберите профиль и нажмите `Применить`. Для экспериментального профиля подтвердите риск.
+7. Нажмите `Проверить`, чтобы заново определить активный профиль, и при необходимости откройте
+   список доступных кодеков.
+8. Для повторного применения после перезагрузки включите `Codecfix после загрузки` и задайте
+   задержку от 0 до 3600 секунд.
 
-## Usage
+Bind mount существуют только до перезагрузки. Чтобы вернуть штатное состояние без перезагрузки,
+примените `Default`. Медиасервисы перезапускаются только после проверки полного набора mount'ов или
+после явного восстановления.
 
-1. Install the APK.
-2. Open `Atlas Codec Fix`.
-3. Enable `ADB helper`.
-4. Set the ADB address and port, usually `localhost:5555`.
-5. Tap `Подключить`.
-6. Use `Запустить preflight` for the compatibility check or `Диагностика` for the complete read-only
-   device report.
-7. Select a profile and tap `Применить` for one-off activation.
-8. Enable `Codecfix после загрузки` and set the boot delay for automatic application.
-9. Tap `Посмотреть кодеки` to rebuild and view the current codec list.
-10. Enable `Небезопасный режим` only if the compatibility guard blocks a known-good target. This is
-   also the explicit override required for automatic application of experimental profiles.
-11. Enable `Ошибки уведомлениями` if errors should also appear as Android notifications.
+## Как выполняется применение
 
-## Project Structure
+1. Приложение подготавливает root-скрипты и, если нужны, встроенные файлы выбранного профиля во
+   временном каталоге.
+2. Через ADB выполняется цепочка `su root sh -c`.
+3. Для профиля, отличного от `Default`, запускается preflight, если пользователь явно не отключил
+   его в небезопасном режиме.
+4. Подготовленный каталог атомарно размещается в `/dev/hevc`. Для `Min`, `Max` и `Ultra`
+   накладываются только файлы, перечисленные в `profile.manifest`; `Direwolf` использует отдельный
+   фиксированный набор штатных vendor-файлов устройства.
+5. Каждый mount проверяется по таблице mount'ов и содержимому файла.
+6. Итоговый профиль определяется повторно. Любая ошибка или несовпадение запускает откат к
+   штатному состоянию.
 
-```text
-app/src/main/java/com/mmwtl/atlascodecfix/
-  AdbClient.kt                 ADB connection and shell execution
-  AdbCommandDeadline.kt        Physical ADB transport timeout watchdog
-  AdbCommandResult.kt          Typed command success/failure model
-  AdbKeyStore.kt               Persistent private ADB key storage
-  CodecFixViewModel.kt         Main-screen state and actions
-  HevcCodecFixRepository.kt    Profile staging, apply, and detection logic
-  HevcCodecFixVariant.kt       Profile definitions
-  MainActivity.kt              Main settings and manual profile application UI
-  AutoApplyReceiver.kt         Validates boot/update broadcasts and schedules work
-  AutoApplyJobService.kt       Bounded background auto-apply execution
-  AutoApplyScheduler.kt        Unique persisted JobScheduler registration
+## Сборка и проверка
 
-hevc/
-  preflight.sh                 Root-side compatibility guard
-  codecfix.sh                  Root-side bind-mount script
-  default/                     Stock/default source configs
-  min/                         Minimal HEVC-enabled profile
-  max/                         Maximum performance-number profile
-  ultra/                       Experimental bundled profile assets
-  tests/                       Host-side transaction and asset validation tests
+Требуются JDK 17 и Android SDK 36. Используйте Gradle Wrapper из репозитория:
+
+```sh
+ANDROID_HOME=/path/to/android-sdk sh gradlew verify :app:assembleDebug
 ```
 
-## Build
+Задача `verify` запускает JVM unit tests, Android lint, тест root-транзакции с имитацией mount и
+проверку XML, JSONC, манифестов и инвариантов профилей. Debug APK создаётся в
+`app/build/outputs/apk/debug/`.
 
-Install JDK 17 and the Android 16 (API 36) SDK, then run:
+Для release-сборки скопируйте пример `app/_secure.signing.gradle` в игнорируемый Git файл
+`secure.signing.gradle`, заполните параметры ключа и выполните:
 
-```bash
-./gradlew :app:assembleDebug
+```sh
+ANDROID_HOME=/path/to/android-sdk sh gradlew :app:assembleRelease
 ```
 
-Release build:
+Без настроенной приватной подписи сборка release-варианта завершается ошибкой; проект не
+подменяет release-ключ стандартным debug-ключом. Итоговый APK создаётся в
+`app/build/outputs/apk/release/` с именем вида
+`<versionName>[<versionCode>]AtlasCodecFix-release.apk`.
 
-```bash
-./gradlew :app:assembleRelease
-```
+Проверьте подпись собранного release APK:
 
-The release APK is written to:
-
-```text
-app/build/outputs/apk/release/
-```
-
-## Release Signing
-
-`assembleRelease` fails when private release signing is not configured. This prevents an artifact
-intended for distribution from being silently signed with the Android debug key. Use
-`:app:assembleDebug` for local testing without private signing material.
-
-For a real release key:
-
-1. Copy `app/_secure.signing.gradle` to `secure.signing.gradle` in the project root.
-2. Fill in `storePassword`, `keyAlias`, and `keyPassword`.
-3. Put the keystore at `atlascodecfix-release.jks`, or change `storeFile` in `secure.signing.gradle`.
-4. Run `./gradlew :app:assembleRelease`.
-
-`secure.signing.gradle`, `*.jks`, and `*.keystore` are ignored by git.
-
-You can verify a built APK with:
-
-```bash
+```sh
 apksigner verify --verbose --print-certs app/build/outputs/apk/release/*.apk
 ```
 
-## Verification
+## Документация и исходные конфигурации
 
-Run all host-side checks and Android lint/unit tests:
+- [`hevc/preflight.sh`](hevc/preflight.sh) — проверка root, vendor-файлов, объявления HEVC и
+  платформы;
+- [`hevc/codecfix.sh`](hevc/codecfix.sh) — restore/apply-транзакция, проверка mount и откат;
+- [`hevc/detect.sh`](hevc/detect.sh) — определение активного профиля;
+- [`NOTICE.md`](NOTICE.md) — условия и уведомления для включённых Qualcomm/vendor-конфигураций.
 
-```bash
-./gradlew verify
-```
-
-Build verification used by CI:
-
-```bash
-./gradlew verify :app:assembleDebug
-```
-
-The shell transaction test uses fake mount commands to verify `Min`, idempotent restore, and
-rollback after a deliberately failed second bind mount. Device-level behavior still needs a rooted
-representative head unit because an emulator cannot reproduce the vendor codec stack and mount
-namespace.
-
-## Safety Notes
-
-- The app executes root commands.
-- It bind-mounts files over `/vendor/etc` media codec configs.
-- The fix is not persistent by itself; rebooting clears the bind mounts.
-- Use `Default` or reboot the device to return to the stock runtime state.
-- `Небезопасный режим` bypasses the compatibility guard and can apply the fix to unsupported targets.
-- `Max`, `Direwolf`, and `Ultra` are experimental cross-device profiles.
-
-## License
-
-No project-wide open-source license is granted yet. See [NOTICE.md](NOTICE.md) before redistribution;
-the bundled Qualcomm/vendor configuration files retain their original notices.
+Проект пока не предоставляет общую open-source лицензию. Перед распространением APK или
+vendor-конфигураций ознакомьтесь с [`NOTICE.md`](NOTICE.md).
