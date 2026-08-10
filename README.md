@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="app/src/main/res/drawable-nodpi/ic_launcher_foreground.png" width="160" alt="Иконка Atlas Codec Fix">
+  <img src="docs/images/app-icon.png" width="160" alt="Иконка Atlas Codec Fix">
 </p>
 
 <h1 align="center">Atlas Codec Fix</h1>
