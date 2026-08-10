@@ -8,8 +8,8 @@ val secureSigningScript = providers.gradleProperty("secure.signing")
     .orNull
     ?.let(rootProject::file)
 val hasReleaseSigning = secureSigningScript?.isFile == true
-val appVersionCode = 21
-val appVersionName = "1.3.1"
+val appVersionCode = 22
+val appVersionName = "1.3.2"
 
 base {
     archivesName.set("$appVersionName[$appVersionCode]AtlasCodecFix")
