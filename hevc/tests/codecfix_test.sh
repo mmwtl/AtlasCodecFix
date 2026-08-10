@@ -11,6 +11,7 @@ BIN_DIR="$TMP_ROOT/bin"
 STATE_DIR="$TMP_ROOT/state"
 STATE_FILE="$STATE_DIR/mounts"
 PIDOF_LOG="$STATE_DIR/pidof.log"
+SLEEP_LOG="$STATE_DIR/sleep.log"
 VENDOR_DIR="$TMP_ROOT/vendor/etc"
 BASE_DIR="$TMP_ROOT/hevc"
 mkdir -p \
@@ -21,6 +22,7 @@ mkdir -p \
     "$BASE_DIR/max"
 : > "$STATE_FILE"
 : > "$PIDOF_LOG"
+: > "$SLEEP_LOG"
 
 cat > "$BIN_DIR/mount" <<'EOF'
 #!/bin/sh
@@ -109,6 +111,19 @@ case "${1:-}" in
 esac
 EOF
 
+cat > "$BIN_DIR/sleep" <<'EOF'
+#!/bin/sh
+set -eu
+printf '%s\n' "${1:-}" >> "$SLEEP_LOG"
+case "${1:-}" in
+    *.*)
+        echo "Fractional sleep is not portable to the target Android shell" >&2
+        exit 2
+        ;;
+esac
+/bin/sleep "$1"
+EOF
+
 chmod 0755 \
     "$BIN_DIR/mount" \
     "$BIN_DIR/umount" \
@@ -116,7 +131,8 @@ chmod 0755 \
     "$BIN_DIR/pidof" \
     "$BIN_DIR/kill" \
     "$BIN_DIR/id" \
-    "$BIN_DIR/getprop"
+    "$BIN_DIR/getprop" \
+    "$BIN_DIR/sleep"
 
 TARGET_CODECS="$VENDOR_DIR/media_codecs_msmnile.xml"
 TARGET_PERFORMANCE="$VENDOR_DIR/media_codecs_performance_msmnile.xml"
@@ -140,7 +156,7 @@ performance=media_codecs_performance_max.xml
 EOF
 
 export PATH="$BIN_DIR:$PATH"
-export STATE_DIR STATE_FILE PIDOF_LOG
+export STATE_DIR STATE_FILE PIDOF_LOG SLEEP_LOG
 export HEVC_BASE_DIR="$BASE_DIR"
 export HEVC_VENDOR_ETC="$VENDOR_DIR"
 export HEVC_MOUNT_TABLE="$STATE_FILE"
@@ -162,6 +178,17 @@ assert_not_contains() {
         echo "Did not expect '$needle' in $file" >&2
         exit 1
     fi
+}
+
+assert_elapsed_less_than() {
+    limit="$1"
+    started_at="$2"
+    operation="$3"
+    elapsed=$(( $(date +%s) - started_at ))
+    [ "$elapsed" -lt "$limit" ] || {
+        echo "$operation exceeded its bounded deadline (${elapsed}s)" >&2
+        exit 1
+    }
 }
 
 assert_file_text() {
@@ -200,14 +227,11 @@ export HEVC_COMMAND_TIMEOUT_SECONDS=1
 export HANG_LAZY_UMOUNT_TARGET="$TARGET_CODECS"
 restore_started_at="$(date +%s)"
 sh "$HEVC_DIR/codecfix.sh" restore > "$TMP_ROOT/restore.out"
-restore_elapsed=$(( $(date +%s) - restore_started_at ))
 unset HANG_LAZY_UMOUNT_TARGET HEVC_COMMAND_TIMEOUT_SECONDS
-[ "$restore_elapsed" -lt 5 ] || {
-    echo "Restore exceeded its bounded unmount deadline (${restore_elapsed}s)" >&2
-    exit 1
-}
+assert_elapsed_less_than 5 "$restore_started_at" 'Restore'
 assert_contains 'variant:msmnile' "$TMP_ROOT/restore.out"
 assert_contains "phase:unmount:$TARGET_CODECS:attempt:1" "$TMP_ROOT/restore.out"
+assert_not_contains '0.1' "$SLEEP_LOG"
 assert_file_text 'stock-codecs c2.qti.hevc' "$TARGET_CODECS"
 [ ! -s "$STATE_FILE" ]
 

@@ -23,10 +23,10 @@ run_bounded() {
 
     "$@" </dev/null >/dev/null 2>&1 &
     command_pid="$!"
-    polls=$((timeout_seconds * 10))
+    polls="$timeout_seconds"
 
     while kill -0 "$command_pid" 2>/dev/null && [ "$polls" -gt 0 ]; do
-        sleep 0.1
+        sleep 1
         polls=$((polls - 1))
     done
 
@@ -36,11 +36,7 @@ run_bounded() {
     fi
 
     kill -TERM "$command_pid" 2>/dev/null || true
-    polls=10
-    while kill -0 "$command_pid" 2>/dev/null && [ "$polls" -gt 0 ]; do
-        sleep 0.1
-        polls=$((polls - 1))
-    done
+    sleep 1
     kill -KILL "$command_pid" 2>/dev/null || true
 
     # A task blocked in uninterruptible kernel sleep can survive SIGKILL. Never wait for it here:
