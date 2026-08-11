@@ -344,6 +344,7 @@ class CodecFixViewModel(
                         it.copy(
                             codecs = codecs,
                             isCodecListLoading = false,
+                            isCodecListVisible = true,
                             codecListStatus = text(R.string.codecs_found, codecs.size)
                         )
                     }
@@ -355,6 +356,8 @@ class CodecFixViewModel(
                 }
         }
     }
+
+    fun hideAvailableCodecs() = _state.update { it.copy(isCodecListVisible = false) }
 
     fun setCodecHardwareFilter(enabled: Boolean) = _state.update { it.copy(showHardwareCodecs = enabled) }
     fun setCodecSoftwareFilter(enabled: Boolean) = _state.update { it.copy(showSoftwareCodecs = enabled) }
@@ -514,6 +517,7 @@ data class CodecFixScreenState(
     val currentVariant: HevcCodecFixVariant? = null,
     val codecs: List<AvailableCodec> = emptyList(),
     val isCodecListLoading: Boolean = false,
+    val isCodecListVisible: Boolean = false,
     val codecListStatus: String? = null,
     val showHardwareCodecs: Boolean = true,
     val showSoftwareCodecs: Boolean = true,

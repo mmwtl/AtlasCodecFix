@@ -82,6 +82,8 @@ ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}" ./gradlew \
 Always build the release variant before handing off a completed fix and verify the resulting APK
 signature. Release packaging intentionally fails without signing material. If private signing is
 not available, report the release build as blocked; never weaken or bypass signing requirements.
+The local release-signing parameters are stored in `secure.signing.gradle` at the repository root;
+the keystore path referenced by that file is also resolved from the repository root.
 
 For shell-only checks:
 

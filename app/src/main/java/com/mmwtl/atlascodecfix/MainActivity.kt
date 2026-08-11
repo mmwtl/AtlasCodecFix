@@ -82,6 +82,7 @@ class MainActivity : ComponentActivity() {
                     onAutoApplyDelayChange = viewModel::setAutoApplyDelay,
                     onSkipCompatibilityCheckChange = viewModel::setSkipCompatibilityCheck,
                     onLoadCodecs = viewModel::loadAvailableCodecs,
+                    onHideCodecs = viewModel::hideAvailableCodecs,
                     onCodecHardwareChange = viewModel::setCodecHardwareFilter,
                     onCodecSoftwareChange = viewModel::setCodecSoftwareFilter,
                     onCodecAudioChange = viewModel::setCodecAudioFilter,
@@ -123,6 +124,7 @@ private fun CodecFixScreen(
     onAutoApplyDelayChange: (String) -> Unit,
     onSkipCompatibilityCheckChange: (Boolean) -> Unit,
     onLoadCodecs: () -> Unit,
+    onHideCodecs: () -> Unit,
     onCodecHardwareChange: (Boolean) -> Unit,
     onCodecSoftwareChange: (Boolean) -> Unit,
     onCodecAudioChange: (Boolean) -> Unit,
@@ -375,6 +377,7 @@ private fun CodecFixScreen(
         CodecListSection(
             state = state,
             onLoadCodecs = onLoadCodecs,
+            onHideCodecs = onHideCodecs,
             onCodecHardwareChange = onCodecHardwareChange,
             onCodecSoftwareChange = onCodecSoftwareChange,
             onCodecAudioChange = onCodecAudioChange,
@@ -452,6 +455,7 @@ private fun StatusHeader(state: CodecFixScreenState) {
 private fun CodecListSection(
     state: CodecFixScreenState,
     onLoadCodecs: () -> Unit,
+    onHideCodecs: () -> Unit,
     onCodecHardwareChange: (Boolean) -> Unit,
     onCodecSoftwareChange: (Boolean) -> Unit,
     onCodecAudioChange: (Boolean) -> Unit,
@@ -483,38 +487,49 @@ private fun CodecListSection(
             )
         }
 
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            FilterSwitchRow(
-                title = stringResource(R.string.filter_hardware),
-                checked = state.showHardwareCodecs,
-                onCheckedChange = onCodecHardwareChange
-            )
-            FilterSwitchRow(
-                title = stringResource(R.string.filter_software),
-                checked = state.showSoftwareCodecs,
-                onCheckedChange = onCodecSoftwareChange
-            )
-            FilterSwitchRow(
-                title = stringResource(R.string.filter_video),
-                checked = state.showVideoCodecs,
-                onCheckedChange = onCodecVideoChange
-            )
-            FilterSwitchRow(
-                title = stringResource(R.string.filter_audio),
-                checked = state.showAudioCodecs,
-                onCheckedChange = onCodecAudioChange
-            )
-        }
+        if (state.isCodecListVisible) {
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !state.isCodecListLoading,
+                shape = RoundedCornerShape(8.dp),
+                onClick = onHideCodecs
+            ) {
+                Text(stringResource(R.string.hide_codecs))
+            }
 
-        state.codecListStatus?.takeIf { it.isNotBlank() }?.let { status ->
-            Text(
-                text = stringResource(R.string.codecs_shown, status, filteredCodecs.size),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                FilterSwitchRow(
+                    title = stringResource(R.string.filter_hardware),
+                    checked = state.showHardwareCodecs,
+                    onCheckedChange = onCodecHardwareChange
+                )
+                FilterSwitchRow(
+                    title = stringResource(R.string.filter_software),
+                    checked = state.showSoftwareCodecs,
+                    onCheckedChange = onCodecSoftwareChange
+                )
+                FilterSwitchRow(
+                    title = stringResource(R.string.filter_video),
+                    checked = state.showVideoCodecs,
+                    onCheckedChange = onCodecVideoChange
+                )
+                FilterSwitchRow(
+                    title = stringResource(R.string.filter_audio),
+                    checked = state.showAudioCodecs,
+                    onCheckedChange = onCodecAudioChange
+                )
+            }
 
-        filteredCodecs.forEach { codec ->
-            CodecRow(codec)
+            state.codecListStatus?.takeIf { it.isNotBlank() }?.let { status ->
+                Text(
+                    text = stringResource(R.string.codecs_shown, status, filteredCodecs.size),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            filteredCodecs.forEach { codec ->
+                CodecRow(codec)
+            }
         }
     }
 }

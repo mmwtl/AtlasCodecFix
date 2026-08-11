@@ -95,6 +95,7 @@
     <string name="collecting_codecs">Собираю список кодеков</string>
     <string name="collecting_short">Собираю список</string>
     <string name="show_codecs">Посмотреть кодеки</string>
+    <string name="hide_codecs">Скрыть кодеки</string>
     <string name="codecs_found">Найдено кодеков: %1$d</string>
     <string name="codecs_shown">%1$s. Показано: %2$d</string>
     <string name="filter_hardware">Хардовые</string>
