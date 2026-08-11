@@ -350,8 +350,9 @@ class HevcCodecFixRepository internal constructor(
     }
 
     private fun buildRestoreCommand(): String {
-        val script = "set -- restore\n${readAssetText(CODECFIX_ASSET)}"
-        return "su root sh -c ${script.shellQuote()}"
+        val script = readAssetText(CODECFIX_ASSET)
+        val invocation = "sh -c ${script.shellQuote()} codecfix.sh restore"
+        return "su root sh -c ${invocation.shellQuote()}"
     }
 
     private fun buildDetectCommand(): String {

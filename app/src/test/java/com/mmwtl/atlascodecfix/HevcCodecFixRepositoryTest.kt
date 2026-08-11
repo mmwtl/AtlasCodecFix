@@ -29,7 +29,10 @@ class HevcCodecFixRepositoryTest {
         assertTrue(result.success)
         assertEquals(0, assets.stageCount.get())
         assertEquals(2, adb.commands.size)
-        assertTrue(adb.commands.first().contains("set -- restore"))
+        val restoreCommand = adb.commands.first()
+        assertTrue(restoreCommand.startsWith("su root sh -c "))
+        assertTrue(restoreCommand.contains(FakeAssets.RESTORE_MARKER))
+        assertEquals(2, Regex("""\bsh -c\b""").findAll(restoreCommand).count())
         assertFalse(adb.commands.any { it.contains(FakeAssets.PREFLIGHT_MARKER) })
     }
 
@@ -173,7 +176,7 @@ class HevcCodecFixRepositoryTest {
         assertFalse(result.success)
         assertTrue(result.restoredToDefault)
         assertEquals(HevcCodecFixVariant.MSMNILE, result.detectedVariant)
-        assertTrue(adb.commands.any { it.contains("set -- restore") })
+        assertTrue(adb.commands.any { it.contains(FakeAssets.RESTORE_MARKER) })
     }
 
     @Test
@@ -215,7 +218,7 @@ class HevcCodecFixRepositoryTest {
 
         assertTrue(result.success)
         assertTrue(adb.commands.none { it.contains(FakeAssets.PREFLIGHT_MARKER) })
-        assertTrue(adb.commands.any { it.contains("set -- restore") })
+        assertTrue(adb.commands.any { it.contains(FakeAssets.RESTORE_MARKER) })
         assertEquals(0, assets.stageCount.get())
     }
 
@@ -234,7 +237,9 @@ class HevcCodecFixRepositoryTest {
 
         assertTrue(result.success)
         assertTrue(result.codecFixSkipped)
-        assertTrue(adb.commands.none { it.contains("NEW_DIR=") || it.contains("set -- restore") })
+        assertTrue(adb.commands.none {
+            it.contains("NEW_DIR=") || it.contains(FakeAssets.RESTORE_MARKER)
+        })
         assertEquals(0, assets.stageCount.get())
     }
 
@@ -268,6 +273,7 @@ class HevcCodecFixRepositoryTest {
 
         companion object {
             const val PREFLIGHT_MARKER = "__TEST_PREFLIGHT__"
+            const val RESTORE_MARKER = "codecfix.sh restore"
         }
     }
 
@@ -288,7 +294,7 @@ class HevcCodecFixRepositoryTest {
                     auto_apply:${if (compatibilityStatus == "supported") "yes" else "no"}
                     reason:test
                 """.trimIndent()
-                command.contains("set -- restore") -> "status:ok\nvariant:msmnile"
+                command.contains(FakeAssets.RESTORE_MARKER) -> "status:ok\nvariant:msmnile"
                 command.contains("NEW_DIR=") -> "status:ok\nvariant:${detectedVariant.argument}"
                 else -> "variant:${detectedVariant.argument}"
             }
@@ -307,7 +313,7 @@ class HevcCodecFixRepositoryTest {
                     currentVariant = HevcCodecFixVariant.MAX
                     "status:ok\nvariant:max"
                 }
-                command.contains("set -- restore") -> {
+                command.contains(FakeAssets.RESTORE_MARKER) -> {
                     currentVariant = HevcCodecFixVariant.MSMNILE
                     "status:ok\nvariant:msmnile"
                 }
@@ -345,7 +351,7 @@ class HevcCodecFixRepositoryTest {
                         AdbCommandResult(stdout = "status:ok", exitCode = 0)
                     }
                 }
-                command.contains("set -- restore") -> {
+                command.contains(FakeAssets.RESTORE_MARKER) -> {
                     currentVariant = HevcCodecFixVariant.DEFAULT
                     AdbCommandResult(stdout = "status:ok", exitCode = 0)
                 }
