@@ -231,6 +231,7 @@ unset HANG_LAZY_UMOUNT_TARGET HEVC_COMMAND_TIMEOUT_SECONDS
 assert_elapsed_less_than 5 "$restore_started_at" 'Restore'
 assert_contains 'variant:msmnile' "$TMP_ROOT/restore.out"
 assert_contains "phase:unmount:$TARGET_CODECS:attempt:1" "$TMP_ROOT/restore.out"
+assert_contains "phase:command_timeout:umount -l $TARGET_CODECS" "$TMP_ROOT/restore.out"
 assert_not_contains '0.1' "$SLEEP_LOG"
 assert_file_text 'stock-codecs c2.qti.hevc' "$TARGET_CODECS"
 [ ! -s "$STATE_FILE" ]

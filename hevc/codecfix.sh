@@ -17,6 +17,19 @@ DIREWOLF_SPECS="$VENDOR_ETC/media_direwolf/video_system_specs.json"
 APPLY_IN_PROGRESS=0
 COMMAND_TIMEOUT_SECONDS="${HEVC_COMMAND_TIMEOUT_SECONDS:-3}"
 
+is_process_active() {
+    process_pid="$1"
+    process_stat="/proc/$process_pid/stat"
+
+    if [ -r "$process_stat" ]; then
+        process_state="$(sed -n 's/^.*) \([^ ]\).*/\1/p' "$process_stat" 2>/dev/null)"
+        case "$process_state" in
+            Z|X) return 1 ;;
+        esac
+    fi
+    kill -0 "$process_pid" 2>/dev/null
+}
+
 run_bounded() {
     timeout_seconds="$1"
     shift
@@ -25,12 +38,12 @@ run_bounded() {
     command_pid="$!"
     polls="$timeout_seconds"
 
-    while kill -0 "$command_pid" 2>/dev/null && [ "$polls" -gt 0 ]; do
+    while is_process_active "$command_pid" && [ "$polls" -gt 0 ]; do
         sleep 1
         polls=$((polls - 1))
     done
 
-    if ! kill -0 "$command_pid" 2>/dev/null; then
+    if ! is_process_active "$command_pid"; then
         wait "$command_pid"
         return "$?"
     fi
@@ -41,9 +54,10 @@ run_bounded() {
 
     # A task blocked in uninterruptible kernel sleep can survive SIGKILL. Never wait for it here:
     # it has no inherited ADB streams, and the caller will verify the mount table before success.
-    if ! kill -0 "$command_pid" 2>/dev/null; then
+    if ! is_process_active "$command_pid"; then
         wait "$command_pid" 2>/dev/null || true
     fi
+    echo "phase:command_timeout:$*"
     return 124
 }
 
