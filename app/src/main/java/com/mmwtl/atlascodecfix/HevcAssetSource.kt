@@ -5,6 +5,7 @@ import java.io.File
 
 internal interface HevcAssetSource {
     fun readText(assetPath: String): String
+    fun stageScript(assetPath: String): File
     fun stage(variant: HevcCodecFixVariant): File
     fun getString(resource: Int, vararg arguments: Any): String
 }
@@ -18,6 +19,16 @@ internal class AndroidHevcAssetSource(
 
     override fun readText(assetPath: String): String {
         return context.assets.open(assetPath).bufferedReader().use { it.readText() }
+    }
+
+    override fun stageScript(assetPath: String): File {
+        val targetDirectory = File(context.noBackupFilesDir, SCRIPT_DIR_NAME)
+        if (!targetDirectory.isDirectory && !targetDirectory.mkdirs()) {
+            error("Unable to create HEVC script directory")
+        }
+        val target = File(targetDirectory, assetPath.substringAfterLast('/'))
+        copyAssetTree(assetPath, target)
+        return target
     }
 
     override fun stage(variant: HevcCodecFixVariant): File {
@@ -67,6 +78,7 @@ internal class AndroidHevcAssetSource(
 
     private companion object {
         private const val HEVC_DIR_NAME = "hevc"
+        private const val SCRIPT_DIR_NAME = "hevc-scripts"
         private const val PREFLIGHT_ASSET = "preflight.sh"
         private const val CODECFIX_ASSET = "codecfix.sh"
         private const val DETECT_ASSET = "detect.sh"

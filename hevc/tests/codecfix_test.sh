@@ -223,6 +223,19 @@ TEST_PLATFORM=unknown sh "$HEVC_DIR/preflight.sh" > "$TMP_ROOT/preflight-risky.o
 assert_contains 'status:risky' "$TMP_ROOT/preflight-risky.out"
 assert_contains 'reason:platform_not_msmnile' "$TMP_ROOT/preflight-risky.out"
 
+sh "$HEVC_DIR/codecfix.sh" max > "$TMP_ROOT/max-success.out"
+sh "$HEVC_DIR/detect.sh" > "$TMP_ROOT/detect-max.out"
+assert_contains 'variant:max' "$TMP_ROOT/detect-max.out"
+
+sh "$HEVC_DIR/restore.sh" > "$TMP_ROOT/direct-restore.out"
+assert_contains 'phase:restore_start' "$TMP_ROOT/direct-restore.out"
+assert_contains 'status:ok' "$TMP_ROOT/direct-restore.out"
+assert_contains 'variant:msmnile' "$TMP_ROOT/direct-restore.out"
+assert_file_text 'stock-codecs c2.qti.hevc' "$TARGET_CODECS"
+[ ! -s "$STATE_FILE" ]
+
+sh "$HEVC_DIR/codecfix.sh" min > "$TMP_ROOT/min-before-bounded-restore.out"
+
 export HEVC_COMMAND_TIMEOUT_SECONDS=1
 export HANG_LAZY_UMOUNT_TARGET="$TARGET_CODECS"
 restore_started_at="$(date +%s)"

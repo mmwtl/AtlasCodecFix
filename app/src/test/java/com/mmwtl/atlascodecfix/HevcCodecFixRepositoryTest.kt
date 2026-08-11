@@ -32,7 +32,9 @@ class HevcCodecFixRepositoryTest {
         val restoreCommand = adb.commands.first()
         assertTrue(restoreCommand.startsWith("su root sh -c "))
         assertTrue(restoreCommand.contains(FakeAssets.RESTORE_MARKER))
-        assertEquals(2, Regex("""\bsh -c\b""").findAll(restoreCommand).count())
+        assertTrue(restoreCommand.contains("/dev/hevc/.standalone/"))
+        assertTrue(restoreCommand.contains("cp "))
+        assertEquals(1, Regex("""\bsh -c\b""").findAll(restoreCommand).count())
         assertFalse(adb.commands.any { it.contains(FakeAssets.PREFLIGHT_MARKER) })
     }
 
@@ -252,7 +254,19 @@ class HevcCodecFixRepositoryTest {
         private val activeStages = AtomicInteger()
 
         override fun readText(assetPath: String): String {
-            return if (assetPath == "preflight.sh") PREFLIGHT_MARKER else "echo codecfix"
+            return when (assetPath) {
+                "preflight.sh" -> PREFLIGHT_MARKER
+                else -> "echo codecfix"
+            }
+        }
+
+        override fun stageScript(assetPath: String): File {
+            val marker = when (assetPath) {
+                "preflight.sh" -> PREFLIGHT_MARKER
+                "restore.sh" -> RESTORE_MARKER
+                else -> "__TEST_DETECT_SCRIPT__"
+            }
+            return File(directory, marker)
         }
 
         override fun getString(resource: Int, vararg arguments: Any): String {
@@ -273,7 +287,7 @@ class HevcCodecFixRepositoryTest {
 
         companion object {
             const val PREFLIGHT_MARKER = "__TEST_PREFLIGHT__"
-            const val RESTORE_MARKER = "codecfix.sh restore"
+            const val RESTORE_MARKER = "__TEST_RESTORE_SCRIPT__"
         }
     }
 

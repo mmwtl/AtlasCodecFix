@@ -346,17 +346,39 @@ class HevcCodecFixRepository internal constructor(
     }
 
     private fun buildPreflightCommand(): String {
-        return "su root sh -c ${readAssetText(PREFLIGHT_ASSET).shellQuote()}"
+        return buildStandaloneScriptCommand(PREFLIGHT_ASSET)
     }
 
     private fun buildRestoreCommand(): String {
-        val script = readAssetText(CODECFIX_ASSET)
-        val invocation = "sh -c ${script.shellQuote()} codecfix.sh restore"
-        return "su root sh -c ${invocation.shellQuote()}"
+        return buildStandaloneScriptCommand(RESTORE_ASSET)
     }
 
     private fun buildDetectCommand(): String {
-        return "su root sh -c ${readAssetText(DETECT_ASSET).shellQuote()}"
+        return buildStandaloneScriptCommand(DETECT_ASSET)
+    }
+
+    private fun buildStandaloneScriptCommand(assetPath: String): String {
+        val source = assets.stageScript(assetPath)
+        val target = "/dev/hevc/.standalone/${source.name}"
+        val command = """
+            set -e
+            TARGET=${target.shellQuote()}
+            TEMP="${'$'}TARGET.tmp.${'$'}${'$'}"
+            cleanup_script() {
+                rm -f "${'$'}TEMP"
+            }
+            trap cleanup_script 0
+            trap 'exit 129' HUP
+            trap 'exit 130' INT
+            trap 'exit 143' TERM
+            mkdir -p /dev/hevc/.standalone
+            cp ${source.absolutePath.shellQuote()} "${'$'}TEMP"
+            chmod 0700 "${'$'}TEMP"
+            mv "${'$'}TEMP" "${'$'}TARGET"
+            trap - 0 HUP INT TERM
+            sh "${'$'}TARGET"
+        """.trimIndent()
+        return "su root sh -c ${command.shellQuote()}"
     }
 
     private fun buildDiagnosticIdentityCommand(): String {
@@ -443,6 +465,7 @@ class HevcCodecFixRepository internal constructor(
         private const val TAG = "AtlasCodecFix"
         private const val PREFLIGHT_ASSET = "preflight.sh"
         private const val CODECFIX_ASSET = "codecfix.sh"
+        private const val RESTORE_ASSET = "restore.sh"
         private const val DETECT_ASSET = "detect.sh"
         private const val PREFLIGHT_TIMEOUT_MS = 45_000L
         private const val DETECT_TIMEOUT_MS = 12_000L
