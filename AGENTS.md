@@ -4,6 +4,19 @@
 
 These instructions apply to the entire repository.
 
+## Versioning and artifact naming
+
+- `main` is the only release branch.
+- Base `versionCode` and `versionName` may be increased only when building from `main`.
+- Builds from any other branch must leave the base `versionCode` and `versionName` unchanged.
+  Their visible effective version must append a sanitized branch-name suffix, for example
+  `1.0.26-seek`.
+- The sanitized branch-name suffix must also be included in the APK/archive filename when the
+  project produces that artifact.
+- Never include the branch name or its suffix in `versionCode`.
+- Preserve artifact naming through the effective version using
+  `<effectiveVersionName>[<versionCode>]AtlasMediaWidget`.
+
 ## Project purpose
 
 AtlasCodecFix is a small Android application for rooted, device-specific Android head units. It
