@@ -11,8 +11,15 @@ class CodecFixPrefs(context: Context) {
         set(value) = prefs.edit { putBoolean(KEY_ADB_ENABLED, value) }
 
     var adbPort: Int
-        get() = prefs.getInt(KEY_ADB_PORT, 5555)
-        set(value) = prefs.edit { putInt(KEY_ADB_PORT, value.coerceIn(1, 65535)) }
+        get() = prefs.getInt(KEY_ADB_PORT, AdbEndpoint.ATLAS_PORT)
+            .takeIf(AdbEndpoint::isValidPort)
+            ?: AdbEndpoint.ATLAS_PORT
+        set(value) = prefs.edit {
+            putInt(
+                KEY_ADB_PORT,
+                if (AdbEndpoint.isValidPort(value)) value else AdbEndpoint.ATLAS_PORT
+            )
+        }
 
     var adbHost: String
         get() = prefs.getString(KEY_ADB_HOST, DEFAULT_ADB_HOST)

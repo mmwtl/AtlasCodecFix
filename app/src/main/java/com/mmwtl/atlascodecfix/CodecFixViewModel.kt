@@ -49,9 +49,43 @@ class CodecFixViewModel(
         if (sanitized.isNotBlank()) app.prefs.adbHost = sanitized
     }
 
+    fun setAdbMode(mode: AdbEndpointMode) {
+        val current = _state.value
+        val port = when (mode) {
+            AdbEndpointMode.ATLAS -> AdbEndpoint.ATLAS_PORT
+            AdbEndpointMode.PREFACE -> AdbEndpoint.PREFACE_PORT
+            AdbEndpointMode.TELNET -> AdbEndpoint.TELNET_PORT
+            AdbEndpointMode.CUSTOM -> current.adbPortText.toIntOrNull()
+                ?.takeIf { it in 1..65_535 && it != AdbEndpoint.ATLAS_PORT && it != AdbEndpoint.PREFACE_PORT }
+                ?: DEFAULT_CUSTOM_PORT
+        }
+        app.prefs.adbPort = port
+        _state.update {
+            it.copy(
+                adbMode = mode,
+                adbPortText = if (mode == AdbEndpointMode.TELNET) "" else port.toString()
+            )
+        }
+        if (current.adbMode != mode && app.prefs.adbEnabled) {
+            viewModelScope.launch {
+                _state.update { it.copy(isBusy = true, status = text(R.string.adb_connecting)) }
+                val connected = app.adbClient.reconnect()
+                val status = text(if (connected) R.string.adb_connected else R.string.adb_connect_failed)
+                if (!connected) notifyError(text(R.string.error_title_adb_connection), status)
+                _state.update { it.copy(isBusy = false, status = status) }
+            }
+        }
+    }
+
     fun setAdbPort(text: String) {
         val sanitized = text.filter(Char::isDigit).take(5)
-        _state.update { it.copy(adbPortText = sanitized) }
+        _state.update {
+            it.copy(
+                adbPortText = sanitized,
+                adbMode = sanitized.toIntOrNull()?.let(AdbEndpoint::modeForPort)
+                    ?: AdbEndpointMode.CUSTOM
+            )
+        }
         val port = sanitized.toIntOrNull()?.takeIf { it in 1..65535 } ?: return
         app.prefs.adbPort = port
     }
@@ -60,13 +94,14 @@ class CodecFixViewModel(
         viewModelScope.launch {
             val endpoint = _state.value
             val port = endpoint.adbPortText.toIntOrNull()
-            if (endpoint.adbHostText.isBlank() || port == null || port !in 1..65535) {
+            if (endpoint.adbMode != AdbEndpointMode.TELNET &&
+                (endpoint.adbHostText.isBlank() || port == null || port !in 1..65535)
+            ) {
                 _state.update { it.copy(status = text(R.string.adb_endpoint_invalid)) }
                 return@launch
             }
 
-            app.adbClient.disconnect()
-            val connected = app.adbClient.connect()
+            val connected = app.adbClient.reconnect()
             val status = text(if (connected) R.string.adb_connected else R.string.adb_connect_failed)
             if (!connected) notifyError(text(R.string.error_title_adb_connection), status)
             _state.update { it.copy(status = status) }
@@ -330,6 +365,33 @@ class CodecFixViewModel(
         }
     }
 
+    fun exportAnalysisBundle() {
+        viewModelScope.launch {
+            if (!_state.value.adbEnabled) {
+                _state.update { it.copy(status = text(R.string.adb_disabled_message)) }
+                return@launch
+            }
+
+            _state.update { it.copy(isBusy = true, status = text(R.string.running_analysis_export)) }
+            val result = app.codecFixRepository.exportAnalysisBundle()
+            val report = result.output.trim().takeLast(DIAGNOSTICS_REPORT_LIMIT)
+                .ifBlank { text(R.string.analysis_export_no_output) }
+            if (!result.commandSuccess) {
+                notifyError(text(R.string.error_title_analysis_export), report)
+            }
+            _state.update {
+                it.copy(
+                    isBusy = false,
+                    status = if (result.commandSuccess) {
+                        text(R.string.analysis_export_succeeded, result.exportPath)
+                    } else {
+                        report
+                    }
+                )
+            }
+        }
+    }
+
     fun loadAvailableCodecs() {
         viewModelScope.launch {
             _state.update {
@@ -369,7 +431,11 @@ class CodecFixViewModel(
         return CodecFixScreenState(
             adbEnabled = prefs.adbEnabled,
             adbHostText = prefs.adbHost,
-            adbPortText = prefs.adbPort.toString(),
+            adbPortText = prefs.adbPort
+                .takeUnless { it == AdbEndpoint.TELNET_PORT }
+                ?.toString()
+                .orEmpty(),
+            adbMode = AdbEndpoint.modeForPort(prefs.adbPort),
             autoApplyCodecFix = prefs.autoApplyCodecFix,
             autoApplyDelayText = prefs.autoApplyDelaySeconds.toString(),
             skipCompatibilityCheck = prefs.skipCompatibilityCheck,
@@ -499,6 +565,7 @@ class CodecFixViewModel(
 
     private companion object {
         private const val MAX_HOST_LENGTH = 253
+        private const val DEFAULT_CUSTOM_PORT = 5556
         private const val PREFLIGHT_REPORT_LIMIT = 2_000
         private const val DIAGNOSTICS_REPORT_LIMIT = 6_000
         private const val STATUS_TEXT_LIMIT = 220
@@ -509,6 +576,7 @@ data class CodecFixScreenState(
     val adbEnabled: Boolean = false,
     val adbHostText: String = "localhost",
     val adbPortText: String = "5555",
+    val adbMode: AdbEndpointMode = AdbEndpointMode.ATLAS,
     val autoApplyCodecFix: Boolean = false,
     val autoApplyDelayText: String = AutoApplyDelay.DEFAULT_SECONDS.toString(),
     val skipCompatibilityCheck: Boolean = false,

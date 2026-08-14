@@ -203,6 +203,30 @@ class HevcCodecFixRepositoryTest {
     }
 
     @Test
+    fun analysisExportCopiesEffectiveCodecFilesAndKeepsParamsSeparate() = runBlocking {
+        val assets = FakeAssets(temporaryFolder.newFolder("analysis-export"))
+        val adb = ExportAdbExecutor()
+        val repository = HevcCodecFixRepository(assets, adb)
+
+        val result = repository.exportAnalysisBundle()
+
+        assertTrue(result.commandSuccess)
+        assertEquals("/sdcard/Download/ACF/20260814_120000", result.exportPath)
+        val command = adb.commands.single()
+        assertTrue(command.startsWith("su root sh -c "))
+        assertTrue(command.contains("/sdcard/Download/ACF"))
+        assertTrue(command.contains("media_codecs*.xml"))
+        assertTrue(command.contains("media_profiles*.xml"))
+        assertTrue(command.contains("video_system_specs*.json"))
+        assertTrue(command.contains("params.txt"))
+        assertTrue(command.contains("getprop"))
+        assertTrue(command.contains("settings list global"))
+        assertTrue(command.contains("settings list secure"))
+        assertTrue(command.contains("dumpsys media.codec"))
+        assertTrue(command.contains("dumpsys media.extractor"))
+    }
+
+    @Test
     fun autoDefaultRestoreBypassesPreflightAndStaging() = runBlocking {
         val assets = FakeAssets(temporaryFolder.newFolder("auto-default"))
         val adb = WorkflowAdbExecutor(
@@ -390,6 +414,18 @@ class HevcCodecFixRepositoryTest {
             } finally {
                 activeCommands.decrementAndGet()
             }
+        }
+    }
+
+    private class ExportAdbExecutor : AdbCommandExecutor {
+        val commands = mutableListOf<String>()
+
+        override suspend fun execute(command: String, timeoutMs: Long): AdbCommandResult {
+            commands += command
+            return AdbCommandResult(
+                stdout = "status:ok\nexport_dir:/sdcard/Download/ACF/20260814_120000\nparams_file:/sdcard/Download/ACF/20260814_120000/params.txt",
+                exitCode = 0
+            )
         }
     }
 }

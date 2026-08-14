@@ -17,11 +17,17 @@
     <string name="adb_host">Адрес ADB</string>
     <string name="adb_host_hint">Для головного устройства обычно localhost</string>
     <string name="adb_port">Порт ADB</string>
+    <string name="adb_port_telnet">Telnet: порт определяется автоматически</string>
+    <string name="adb_mode_atlas">Atlas</string>
+    <string name="adb_mode_preface">Preface</string>
+    <string name="adb_mode_custom">Custom</string>
+    <string name="adb_mode_telnet">Telnet</string>
     <string name="action_connect">Подключить</string>
     <string name="action_disconnect">Отключить</string>
     <string name="action_check">Проверить</string>
     <string name="action_run_preflight">Запустить preflight</string>
     <string name="action_run_diagnostics">Диагностика</string>
+    <string name="action_export_analysis">Выгрузить файлы для анализа</string>
     <string name="action_apply">Применить</string>
     <string name="action_cancel">Отмена</string>
 
@@ -60,6 +66,10 @@
     <string name="running_diagnostics">Собираю безопасный диагностический отчёт</string>
     <string name="diagnostics_no_output">Диагностика не вернула отчёт</string>
     <string name="error_title_diagnostics">Диагностика Codec Fix</string>
+    <string name="running_analysis_export">Выгружаю файлы и параметры в Downloads/ACF</string>
+    <string name="analysis_export_no_output">Выгрузка не вернула путь к файлам</string>
+    <string name="analysis_export_succeeded">Файлы выгружены: %1$s</string>
+    <string name="error_title_analysis_export">Выгрузка данных для анализа</string>
     <string name="auto_unavailable">Автоприменение недоступно для этого устройства</string>
     <string name="error_title_auto_unavailable">Автоприменение недоступно</string>
     <string name="auto_enabled_for">Автоприменение включено для %1$s</string>

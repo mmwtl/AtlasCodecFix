@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
                     state = screenState,
                     onAdbEnabledChange = viewModel::setAdbEnabled,
                     onHostChange = viewModel::setAdbHost,
+                    onAdbModeChange = viewModel::setAdbMode,
                     onPortChange = viewModel::setAdbPort,
                     onConnect = viewModel::connectAdb,
                     onDisconnect = viewModel::disconnectAdb,
@@ -78,6 +79,7 @@ class MainActivity : ComponentActivity() {
                     onRefresh = viewModel::refreshCurrentVariant,
                     onPreflight = viewModel::runPreflightCheck,
                     onDiagnostics = viewModel::runDiagnostics,
+                    onExportAnalysis = viewModel::exportAnalysisBundle,
                     onAutoApplyCodecFixChange = viewModel::setAutoApplyCodecFix,
                     onAutoApplyDelayChange = viewModel::setAutoApplyDelay,
                     onSkipCompatibilityCheckChange = viewModel::setSkipCompatibilityCheck,
@@ -112,6 +114,7 @@ private fun CodecFixScreen(
     state: CodecFixScreenState,
     onAdbEnabledChange: (Boolean) -> Unit,
     onHostChange: (String) -> Unit,
+    onAdbModeChange: (AdbEndpointMode) -> Unit,
     onPortChange: (String) -> Unit,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
@@ -120,6 +123,7 @@ private fun CodecFixScreen(
     onRefresh: () -> Unit,
     onPreflight: () -> Unit,
     onDiagnostics: () -> Unit,
+    onExportAnalysis: () -> Unit,
     onAutoApplyCodecFixChange: (Boolean) -> Unit,
     onAutoApplyDelayChange: (String) -> Unit,
     onSkipCompatibilityCheckChange: (Boolean) -> Unit,
@@ -214,12 +218,23 @@ private fun CodecFixScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
             )
 
+            AdbModeSelector(
+                selected = state.adbMode,
+                enabled = !state.isBusy,
+                onSelected = onAdbModeChange
+            )
+
             OutlinedTextField(
                 modifier = Modifier.fillMaxWidth(),
                 value = state.adbPortText,
                 onValueChange = onPortChange,
-                enabled = !state.isBusy,
+                enabled = !state.isBusy && state.adbMode != AdbEndpointMode.TELNET,
                 label = { Text(stringResource(R.string.adb_port)) },
+                supportingText = if (state.adbMode == AdbEndpointMode.TELNET) {
+                    { Text(stringResource(R.string.adb_port_telnet)) }
+                } else {
+                    null
+                },
                 singleLine = true,
                 shape = RoundedCornerShape(8.dp),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
@@ -257,6 +272,14 @@ private fun CodecFixScreen(
                 onClick = onDiagnostics
             ) {
                 Text(stringResource(R.string.action_run_diagnostics))
+            }
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = state.adbEnabled && !state.isBusy,
+                shape = RoundedCornerShape(8.dp),
+                onClick = onExportAnalysis
+            ) {
+                Text(stringResource(R.string.action_export_analysis))
             }
         }
 
@@ -418,6 +441,90 @@ private fun CodecFixScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun AdbModeSelector(
+    selected: AdbEndpointMode,
+    enabled: Boolean,
+    onSelected: (AdbEndpointMode) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            AdbModeButton(
+                modifier = Modifier.weight(1f),
+                mode = AdbEndpointMode.ATLAS,
+                selected = selected == AdbEndpointMode.ATLAS,
+                enabled = enabled,
+                onClick = onSelected
+            )
+            AdbModeButton(
+                modifier = Modifier.weight(1f),
+                mode = AdbEndpointMode.PREFACE,
+                selected = selected == AdbEndpointMode.PREFACE,
+                enabled = enabled,
+                onClick = onSelected
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            AdbModeButton(
+                modifier = Modifier.weight(1f),
+                mode = AdbEndpointMode.CUSTOM,
+                selected = selected == AdbEndpointMode.CUSTOM,
+                enabled = enabled,
+                onClick = onSelected
+            )
+            AdbModeButton(
+                modifier = Modifier.weight(1f),
+                mode = AdbEndpointMode.TELNET,
+                selected = selected == AdbEndpointMode.TELNET,
+                enabled = enabled,
+                onClick = onSelected
+            )
+        }
+    }
+}
+
+@Composable
+private fun AdbModeButton(
+    modifier: Modifier,
+    mode: AdbEndpointMode,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: (AdbEndpointMode) -> Unit
+) {
+    val title = when (mode) {
+        AdbEndpointMode.ATLAS -> stringResource(R.string.adb_mode_atlas)
+        AdbEndpointMode.PREFACE -> stringResource(R.string.adb_mode_preface)
+        AdbEndpointMode.CUSTOM -> stringResource(R.string.adb_mode_custom)
+        AdbEndpointMode.TELNET -> stringResource(R.string.adb_mode_telnet)
+    }
+    if (selected) {
+        Button(
+            modifier = modifier,
+            enabled = enabled,
+            colors = atlasButtonColors(),
+            shape = RoundedCornerShape(8.dp),
+            onClick = { onClick(mode) }
+        ) {
+            Text(title)
+        }
+    } else {
+        OutlinedButton(
+            modifier = modifier,
+            enabled = enabled,
+            shape = RoundedCornerShape(8.dp),
+            onClick = { onClick(mode) }
+        ) {
+            Text(title)
         }
     }
 }

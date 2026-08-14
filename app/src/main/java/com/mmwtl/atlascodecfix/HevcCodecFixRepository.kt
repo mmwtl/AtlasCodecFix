@@ -51,6 +51,21 @@ class HevcCodecFixRepository internal constructor(
         }
     }
 
+    suspend fun exportAnalysisBundle(): HevcCodecFixExportResult = withContext(Dispatchers.IO) {
+        operationMutex.withLock {
+            val commandResult = executeCatching(
+                buildAnalysisExportCommand(),
+                ANALYSIS_EXPORT_TIMEOUT_MS
+            )
+            HevcCodecFixExportResult(
+                output = commandResult.displayOutput,
+                commandSuccess = commandResult.succeeded,
+                exportPath = parseKey(commandResult.displayOutput, "export_dir")
+                    ?: ANALYSIS_EXPORT_ROOT
+            )
+        }
+    }
+
     private suspend fun checkCompatibilityLocked(): HevcCodecFixCompatibilityResult {
         val commandResult = executeCatching(buildPreflightCommand(), PREFLIGHT_TIMEOUT_MS)
         val output = commandResult.displayOutput
@@ -403,6 +418,102 @@ class HevcCodecFixRepository internal constructor(
         return "su root sh -c ${script.shellQuote()}"
     }
 
+    private fun buildAnalysisExportCommand(): String {
+        val script = """
+            set -e
+            OUT_ROOT=${ANALYSIS_EXPORT_ROOT.shellQuote()}
+            STAMP="${'$'}(
+                date +%Y%m%d_%H%M%S 2>/dev/null | tr -cd '0-9_'
+            )"
+            if [ -z "${'$'}STAMP" ]; then
+                STAMP="manual_${'$'}${'$'}"
+            fi
+            EXPORT_DIR="${'$'}OUT_ROOT/${'$'}STAMP"
+            TEMP_DIR="${'$'}OUT_ROOT/.acf.tmp.${'$'}${'$'}"
+
+            cleanup_export() {
+                status="${'$'}?"
+                trap - 0 HUP INT TERM
+                if [ "${'$'}status" -ne 0 ]; then
+                    rm -rf "${'$'}TEMP_DIR"
+                fi
+                exit "${'$'}status"
+            }
+
+            trap cleanup_export 0
+            trap 'exit 129' HUP
+            trap 'exit 130' INT
+            trap 'exit 143' TERM
+            mkdir -p "${'$'}OUT_ROOT" "${'$'}TEMP_DIR/default"
+            if [ -e "${'$'}EXPORT_DIR" ]; then
+                STAMP="${'$'}{STAMP}_${'$'}${'$'}"
+                EXPORT_DIR="${'$'}OUT_ROOT/${'$'}STAMP"
+            fi
+
+            : > "${'$'}TEMP_DIR/manifest.txt"
+            for ROOT in /vendor/etc /product/etc /system/etc; do
+                if [ -d "${'$'}ROOT" ]; then
+                    find "${'$'}ROOT" -type f \( \
+                        -name 'media_codecs*.xml' -o \
+                        -name 'media_profiles*.xml' -o \
+                        -name 'video_system_specs*.json' \
+                    \) -print >> "${'$'}TEMP_DIR/manifest.txt"
+                fi
+            done
+            sort -u "${'$'}TEMP_DIR/manifest.txt" > "${'$'}TEMP_DIR/manifest.sorted"
+            mv "${'$'}TEMP_DIR/manifest.sorted" "${'$'}TEMP_DIR/manifest.txt"
+            if [ ! -s "${'$'}TEMP_DIR/manifest.txt" ]; then
+                echo "reason:no_default_codec_files"
+                exit 1
+            fi
+
+            while IFS= read -r SOURCE; do
+                [ -n "${'$'}SOURCE" ] || continue
+                REL="${'$'}{SOURCE#/}"
+                DEST="${'$'}TEMP_DIR/default/${'$'}REL"
+                mkdir -p "${'$'}(dirname "${'$'}DEST")"
+                cp "${'$'}SOURCE" "${'$'}DEST"
+            done < "${'$'}TEMP_DIR/manifest.txt"
+
+            {
+                echo "atlas_params:2"
+                echo "collected_at:${'$'}STAMP"
+                echo "section:identity"
+                id 2>&1 || true
+                echo "section:properties"
+                getprop 2>&1 || true
+                echo "section:settings_global"
+                settings list global 2>&1 || true
+                echo "section:settings_system"
+                settings list system 2>&1 || true
+                echo "section:settings_secure"
+                settings list secure 2>&1 || true
+                echo "section:media_codec"
+                dumpsys media.codec 2>&1 || true
+                echo "section:media_extractor"
+                dumpsys media.extractor 2>&1 || true
+                echo "section:media_metrics"
+                dumpsys media.metrics 2>&1 || true
+                echo "section:media_resource_manager"
+                dumpsys media.resource_manager 2>&1 || true
+                echo "section:mounts"
+                cat /proc/mounts 2>&1 || true
+                echo "section:default_files"
+                while IFS= read -r SOURCE; do
+                    echo "file:${'$'}SOURCE"
+                done < "${'$'}TEMP_DIR/manifest.txt"
+            } > "${'$'}TEMP_DIR/params.txt"
+
+            mv "${'$'}TEMP_DIR" "${'$'}EXPORT_DIR"
+            trap - 0 HUP INT TERM
+            echo "status:ok"
+            echo "export_dir:${'$'}EXPORT_DIR"
+            echo "default_files:${'$'}(find "${'$'}EXPORT_DIR/default" -type f | wc -l | tr -d ' ')"
+            echo "params_file:${'$'}EXPORT_DIR/params.txt"
+        """.trimIndent()
+        return "su root sh -c ${script.shellQuote()}"
+    }
+
     private fun readAssetText(assetPath: String): String {
         return assets.readText(assetPath)
     }
@@ -470,7 +581,9 @@ class HevcCodecFixRepository internal constructor(
         private const val PREFLIGHT_TIMEOUT_MS = 45_000L
         private const val DETECT_TIMEOUT_MS = 12_000L
         private const val DIAGNOSTICS_IDENTITY_TIMEOUT_MS = 12_000L
+        private const val ANALYSIS_EXPORT_TIMEOUT_MS = 120_000L
         private const val APPLY_TIMEOUT_MS = 60_000L
+        private const val ANALYSIS_EXPORT_ROOT = "/sdcard/Download/ACF"
     }
 }
 
@@ -517,6 +630,12 @@ data class HevcCodecFixDiagnosticResult(
     val output: String,
     val commandSuccess: Boolean,
     val variant: HevcCodecFixVariant?
+)
+
+data class HevcCodecFixExportResult(
+    val output: String,
+    val commandSuccess: Boolean,
+    val exportPath: String
 )
 
 data class HevcCodecFixApplyResult(

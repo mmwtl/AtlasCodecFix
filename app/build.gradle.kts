@@ -1,3 +1,5 @@
+import java.util.Locale
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -8,11 +10,39 @@ val secureSigningScript = providers.gradleProperty("secure.signing")
     .orNull
     ?.let(rootProject::file)
 val hasReleaseSigning = secureSigningScript?.isFile == true
-val appVersionCode = 23
-val appVersionName = "1.3.3"
+val baseVersionCode = 23
+val baseVersionName = "1.3.3"
+
+fun currentGitBranch(): String {
+    return runCatching {
+        val process = ProcessBuilder("git", "branch", "--show-current")
+            .directory(rootProject.projectDir)
+            .redirectErrorStream(true)
+            .start()
+        val branch = process.inputStream.bufferedReader().use { it.readText().trim() }
+        process.waitFor()
+        branch
+    }.getOrDefault("")
+}
+
+val buildBranch = providers.gradleProperty("branch.name").orNull
+    ?: System.getenv("GIT_BRANCH")?.substringAfterLast('/')
+    ?: currentGitBranch()
+val sanitizedBranch = buildBranch
+    .ifBlank { "detached" }
+    .replace(Regex("[^A-Za-z0-9._-]+"), "-")
+    .trim('-')
+    .lowercase(Locale.ROOT)
+    .take(32)
+    .ifBlank { "detached" }
+val appVersionName = if (buildBranch == "main") {
+    baseVersionName
+} else {
+    "$baseVersionName-$sanitizedBranch"
+}
 
 base {
-    archivesName.set("$appVersionName[$appVersionCode]AtlasCodecFix")
+    archivesName.set("$appVersionName[$baseVersionCode]AtlasCodecFix")
 }
 
 android {
@@ -23,7 +53,7 @@ android {
         applicationId = "com.mmwtl.atlascodecfix"
         minSdk = 26
         targetSdk = 36
-        versionCode = appVersionCode
+        versionCode = baseVersionCode
         versionName = appVersionName
     }
 
