@@ -114,6 +114,18 @@ internal class TelnetShellTransport private constructor(
         return remainingMs.coerceAtMost(READ_SLICE_TIMEOUT_MS.toLong()).toInt()
     }
 
+    internal fun prepareQuietShell() {
+        // Telnet exposes an interactive PTY, so the shell otherwise echoes every byte of a
+        // multiline command and prints PS2 (usually ">") for each continuation line.
+        runCatching {
+            exec(
+                command = "stty -echo 2>/dev/null || true; PS1=''; PS2=''",
+                marker = "__TELNET_SETUP__:${System.nanoTime()}",
+                timeoutMs = SETUP_TIMEOUT_MS
+            )
+        }
+    }
+
     private fun drainTrailingOutput() {
         socket.soTimeout = TRAILING_DRAIN_TIMEOUT_MS
         while (true) {
@@ -134,6 +146,7 @@ internal class TelnetShellTransport private constructor(
         private const val WONT = 0xFC
         private const val DO = 0xFD
         private const val DONT = 0xFE
+        private const val SETUP_TIMEOUT_MS = 5_000L
         private const val TRAILING_DRAIN_TIMEOUT_MS = 200
 
         fun connect(host: String, port: Int): TelnetShellTransport {
