@@ -21,10 +21,7 @@ internal class TelnetShellDiscovery(private val markerFactory: () -> String) {
                 TelnetShellTransport.connect(cached.host, cached.port)
             }.getOrNull()
             if (transport != null) {
-                if (isAndroidShell(transport)) {
-                    transport.prepareQuietShell()
-                    return cached to transport
-                }
+                if (isAndroidShell(transport)) return cached to transport
                 transport.close()
             }
         }
@@ -35,7 +32,6 @@ internal class TelnetShellDiscovery(private val markerFactory: () -> String) {
                     TelnetShellTransport.connect(host, port)
                 }.getOrNull() ?: continue
                 if (isAndroidShell(transport)) {
-                    transport.prepareQuietShell()
                     val endpoint = TelnetShellEndpoint(host, port)
                     cachedEndpoint = endpoint
                     return endpoint to transport

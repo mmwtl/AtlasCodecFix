@@ -96,14 +96,10 @@ internal class TelnetShellTransport private constructor(
     private fun normalizeResponse(response: String, marker: String): String {
         var result = response.trimEnd('\n')
         val echoSuffix = "echo $marker\$?"
-        val firstNewline = result.indexOf('\n')
-        if (firstNewline >= 0) {
-            val firstLine = result.substring(0, firstNewline)
-            if (firstLine.endsWith(echoSuffix)) {
-                result = result.substring(firstNewline + 1)
-            }
-        } else if (result.endsWith(echoSuffix)) {
-            result = ""
+        val echoIndex = result.indexOf(echoSuffix)
+        if (echoIndex >= 0) {
+            val echoLineEnd = result.indexOf('\n', echoIndex + echoSuffix.length)
+            result = if (echoLineEnd >= 0) result.substring(echoLineEnd + 1) else ""
         }
         return result.trim()
     }
@@ -112,18 +108,6 @@ internal class TelnetShellTransport private constructor(
         val remainingMs = ((deadlineNanos - System.nanoTime()) / NANOS_PER_MILLISECOND)
             .coerceAtLeast(1L)
         return remainingMs.coerceAtMost(READ_SLICE_TIMEOUT_MS.toLong()).toInt()
-    }
-
-    internal fun prepareQuietShell() {
-        // Telnet exposes an interactive PTY, so the shell otherwise echoes every byte of a
-        // multiline command and prints PS2 (usually ">") for each continuation line.
-        runCatching {
-            exec(
-                command = "stty -echo 2>/dev/null || true; PS1=''; PS2=''",
-                marker = "__TELNET_SETUP__:${System.nanoTime()}",
-                timeoutMs = SETUP_TIMEOUT_MS
-            )
-        }
     }
 
     private fun drainTrailingOutput() {
@@ -146,7 +130,6 @@ internal class TelnetShellTransport private constructor(
         private const val WONT = 0xFC
         private const val DO = 0xFD
         private const val DONT = 0xFE
-        private const val SETUP_TIMEOUT_MS = 5_000L
         private const val TRAILING_DRAIN_TIMEOUT_MS = 200
 
         fun connect(host: String, port: Int): TelnetShellTransport {

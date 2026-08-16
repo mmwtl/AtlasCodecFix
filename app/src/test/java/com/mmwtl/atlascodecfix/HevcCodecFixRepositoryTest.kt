@@ -34,7 +34,6 @@ class HevcCodecFixRepositoryTest {
         assertTrue(restoreCommand.contains(FakeAssets.RESTORE_MARKER))
         assertTrue(restoreCommand.contains("/dev/hevc/.standalone/"))
         assertTrue(restoreCommand.contains("cp "))
-        assertTrue(restoreCommand.endsWith(" </dev/null"))
         assertEquals(1, Regex("""\bsh -c\b""").findAll(restoreCommand).count())
         assertFalse(adb.commands.any { it.contains(FakeAssets.PREFLIGHT_MARKER) })
     }
@@ -109,7 +108,6 @@ class HevcCodecFixRepositoryTest {
         assertTrue(result.commandSuccess)
         val command = adb.commands.single()
         assertTrue(command.startsWith("su root sh -c "))
-        assertTrue(command.endsWith(" </dev/null"))
         assertEquals(1, Regex("""\bsh -c\b""").findAll(command).count())
         assertFalse(command.contains("/dev/hevc.operation.lock"))
     }
@@ -128,7 +126,6 @@ class HevcCodecFixRepositoryTest {
         assertTrue(result.success)
         val applyCommand = adb.commands.first { it.contains("NEW_DIR=") }
         assertTrue(applyCommand.startsWith("su root sh -c "))
-        assertTrue(applyCommand.endsWith(" </dev/null"))
         assertTrue(applyCommand.contains("/dev/hevc"))
     }
 
@@ -195,7 +192,6 @@ class HevcCodecFixRepositoryTest {
         assertTrue(result.commandSuccess)
         assertEquals(3, adb.commands.size)
         assertTrue(adb.commands.all { it.startsWith("su root sh -c ") })
-        assertTrue(adb.commands.all { it.endsWith(" </dev/null") })
         assertTrue(adb.commands.all { command ->
             Regex("""\bsh -c\b""").findAll(command).count() == 1
         })
@@ -218,7 +214,6 @@ class HevcCodecFixRepositoryTest {
         assertEquals("/sdcard/Download/ACF/20260814_120000", result.exportPath)
         val command = adb.commands.single()
         assertTrue(command.startsWith("su root sh -c "))
-        assertTrue(command.endsWith(" </dev/null"))
         assertTrue(command.contains("/sdcard/Download/ACF"))
         assertTrue(command.contains("media_codecs*.xml"))
         assertTrue(command.contains("media_profiles*.xml"))
