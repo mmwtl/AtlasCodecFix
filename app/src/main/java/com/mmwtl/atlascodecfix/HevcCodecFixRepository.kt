@@ -357,7 +357,7 @@ class HevcCodecFixRepository internal constructor(
             fi
         """.trimIndent()
 
-        return "su root sh -c ${script.shellQuote()}"
+        return buildRootShellCommand(script)
     }
 
     private fun buildPreflightCommand(): String {
@@ -393,7 +393,7 @@ class HevcCodecFixRepository internal constructor(
             trap - 0 HUP INT TERM
             sh "${'$'}TARGET"
         """.trimIndent()
-        return "su root sh -c ${command.shellQuote()}"
+        return buildRootShellCommand(command)
     }
 
     private fun buildDiagnosticIdentityCommand(): String {
@@ -415,7 +415,7 @@ class HevcCodecFixRepository internal constructor(
                 fi
             done
         """.trimIndent()
-        return "su root sh -c ${script.shellQuote()}"
+        return buildRootShellCommand(script)
     }
 
     private fun buildAnalysisExportCommand(): String {
@@ -511,7 +511,7 @@ class HevcCodecFixRepository internal constructor(
             echo "default_files:${'$'}(find "${'$'}EXPORT_DIR/default" -type f | wc -l | tr -d ' ')"
             echo "params_file:${'$'}EXPORT_DIR/params.txt"
         """.trimIndent()
-        return "su root sh -c ${script.shellQuote()}"
+        return buildRootShellCommand(script)
     }
 
     private fun readAssetText(assetPath: String): String {
@@ -567,6 +567,12 @@ class HevcCodecFixRepository internal constructor(
 
     private fun contextText(resource: Int, vararg arguments: Any): String {
         return assets.getString(resource, *arguments)
+    }
+
+    private fun buildRootShellCommand(script: String): String {
+        // Telnet exposes an interactive PTY. Some vendor su implementations keep waiting on that
+        // PTY after the child shell finishes, so the transport never reaches its completion marker.
+        return "su root sh -c ${script.shellQuote()} </dev/null"
     }
 
     private fun String.shellQuote(): String = "'" + replace("'", "'\"'\"'") + "'"
