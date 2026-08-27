@@ -62,8 +62,11 @@ class AutoApplyJobService : JobService() {
             return false
         }
 
-        if (!app.adbClient.connect()) {
-            return retryOrStop(getString(R.string.auto_apply_connect_failed))
+        if (!app.adbClient.connectForAutoApply()) {
+            val message = (app.adbClient.connectionState.value as? AdbConnectionState.Error)
+                ?.message
+                ?: getString(R.string.auto_apply_connect_failed)
+            return retryOrStop(message)
         }
 
         val targetVariant = prefs.selectedVariant

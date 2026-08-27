@@ -57,6 +57,22 @@ class CodecFixPrefs(context: Context) {
         get() = prefs.getInt(KEY_AUTO_APPLY_RETRY_COUNT, 0).coerceAtLeast(0)
         set(value) = prefs.edit { putInt(KEY_AUTO_APPLY_RETRY_COUNT, value.coerceAtLeast(0)) }
 
+    internal var lastTelnetHost: String?
+        get() = prefs.getString(KEY_LAST_TELNET_HOST, null)
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+        set(value) = prefs.edit {
+            if (value.isNullOrBlank()) remove(KEY_LAST_TELNET_HOST)
+            else putString(KEY_LAST_TELNET_HOST, value.trim())
+        }
+
+    internal var lastTelnetPort: Int?
+        get() = prefs.getInt(KEY_LAST_TELNET_PORT, 0).takeIf { it in 1..65_535 }
+        set(value) = prefs.edit {
+            if (value == null || value !in 1..65_535) remove(KEY_LAST_TELNET_PORT)
+            else putInt(KEY_LAST_TELNET_PORT, value)
+        }
+
     private companion object {
         private const val KEY_ADB_ENABLED = "adb_enabled"
         private const val KEY_ADB_HOST = "adb_host"
@@ -67,6 +83,8 @@ class CodecFixPrefs(context: Context) {
         private const val KEY_ERROR_NOTIFICATIONS_ENABLED = "error_notifications_enabled"
         private const val KEY_SELECTED_VARIANT = "selected_variant"
         private const val KEY_AUTO_APPLY_RETRY_COUNT = "auto_apply_retry_count"
+        private const val KEY_LAST_TELNET_HOST = "last_telnet_host"
+        private const val KEY_LAST_TELNET_PORT = "last_telnet_port"
         private const val DEFAULT_ADB_HOST = "localhost"
     }
 }

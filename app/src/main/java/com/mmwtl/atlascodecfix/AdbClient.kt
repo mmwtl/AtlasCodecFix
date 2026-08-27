@@ -55,7 +55,7 @@ class AdbClient(
     private var connection: AdbConnection? = null
 
     @Volatile
-    private var telnetTransport: TelnetShellTransport? = null
+    private var telnetTransport: TelnetCommandTransport? = null
 
     @Volatile
     private var connectedEndpoint: AdbEndpointSnapshot? = null
@@ -69,7 +69,12 @@ class AdbClient(
     @Volatile
     private var connectionEpoch = 0L
 
-    suspend fun connect(): Boolean = withContext(Dispatchers.IO) {
+    suspend fun connect(): Boolean = connect(telnetReadyTimeoutMs = 0L)
+
+    suspend fun connectForAutoApply(): Boolean =
+        connect(telnetReadyTimeoutMs = TELNET_AUTO_APPLY_READY_TIMEOUT_MS)
+
+    private suspend fun connect(telnetReadyTimeoutMs: Long): Boolean = withContext(Dispatchers.IO) {
         if (!prefs.adbEnabled) {
             disconnect()
             return@withContext false
@@ -78,7 +83,7 @@ class AdbClient(
         manuallyDisconnected = false
         val endpoint = prefs.endpointSnapshot()
         val connected = if (endpoint.port == AdbEndpoint.TELNET_PORT) {
-            connectTelnet(endpoint)
+            connectTelnetUntilReady(endpoint, telnetReadyTimeoutMs)
         } else {
             connectAdb(endpoint)
         }
@@ -159,7 +164,6 @@ class AdbClient(
 
     private suspend fun connectAdb(endpoint: AdbEndpointSnapshot): Boolean =
         withContext(Dispatchers.IO) {
-            var shouldReconnect = false
             val connected = lock.withLock {
                 val myEpoch = synchronized(connectionGuard) { connectionEpoch }
                 if (isConnectedFor(endpoint)) return@withLock true
@@ -225,7 +229,6 @@ class AdbClient(
                     }
                     throw t
                 } catch (t: Throwable) {
-                    shouldReconnect = true
                     runCatching { newSocket?.close() }
                     synchronized(connectionGuard) {
                         if (socket === newSocket) socket = null
@@ -236,20 +239,55 @@ class AdbClient(
                     false
                 }
             }
-            if (!connected && shouldReconnect) scheduleReconnect(endpoint)
             connected
         }
 
-    private suspend fun connectTelnet(endpoint: AdbEndpointSnapshot): Boolean =
+    private suspend fun connectTelnetUntilReady(
+        endpoint: AdbEndpointSnapshot,
+        readyTimeoutMs: Long
+    ): Boolean {
+        val deadlineNanos = System.nanoTime() +
+            readyTimeoutMs.coerceAtLeast(0L) * NANOS_PER_MILLISECOND
+        do {
+            val remainingMs = ((deadlineNanos - System.nanoTime()) / NANOS_PER_MILLISECOND)
+                .coerceAtLeast(0L)
+            val discoveryTimeoutMs = if (readyTimeoutMs <= 0L) {
+                TELNET_DISCOVERY_ATTEMPT_TIMEOUT_MS
+            } else {
+                remainingMs.coerceAtLeast(1L).coerceAtMost(TELNET_DISCOVERY_ATTEMPT_TIMEOUT_MS)
+            }
+            if (connectTelnet(endpoint, discoveryTimeoutMs)) return true
+            if (readyTimeoutMs <= 0L || System.nanoTime() >= deadlineNanos) return false
+            delay(
+                ((deadlineNanos - System.nanoTime()) / NANOS_PER_MILLISECOND)
+                    .coerceAtLeast(1L)
+                    .coerceAtMost(TELNET_READY_RETRY_DELAY_MS)
+            )
+        } while (System.nanoTime() < deadlineNanos)
+        return false
+    }
+
+    private suspend fun connectTelnet(
+        endpoint: AdbEndpointSnapshot,
+        discoveryTimeoutMs: Long
+    ): Boolean =
         withContext(Dispatchers.IO) {
-            var shouldReconnect = false
             val connected = lock.withLock {
                 val myEpoch = synchronized(connectionGuard) { connectionEpoch }
                 if (isConnectedFor(endpoint)) return@withLock true
                 closeTransportLocked()
                 _connectionState.value = AdbConnectionState.Connecting
                 try {
-                    val (discoveredEndpoint, transport) = telnetDiscovery.open()
+                    val preferredEndpoint = prefs.lastTelnetPort?.let { port ->
+                        TelnetShellDiscovery.TelnetShellEndpoint(
+                            host = prefs.lastTelnetHost ?: "127.0.0.1",
+                            port = port
+                        )
+                    }
+                    val (discoveredEndpoint, transport) = telnetDiscovery.open(
+                        preferredEndpoint = preferredEndpoint,
+                        timeoutMs = discoveryTimeoutMs
+                    )
                     val canPublish = synchronized(connectionGuard) {
                         connectionEpoch == myEpoch && !manuallyDisconnected
                     }
@@ -267,13 +305,14 @@ class AdbClient(
                         telnetTransport = transport
                         connectedEndpoint = endpoint.copy(host = discoveredEndpoint.host)
                     }
+                    prefs.lastTelnetHost = discoveredEndpoint.host
+                    prefs.lastTelnetPort = discoveredEndpoint.port
                     _connectionState.value = AdbConnectionState.Connected
                     cancelReconnectLoop()
                     true
                 } catch (t: CancellationException) {
                     throw t
                 } catch (t: Throwable) {
-                    shouldReconnect = true
                     telnetDiscovery.clearCache()
                     Log.w(TAG, "Telnet connect failed", t)
                     _connectionState.value =
@@ -281,7 +320,6 @@ class AdbClient(
                     false
                 }
             }
-            if (!connected && shouldReconnect) scheduleReconnect(endpoint)
             connected
         }
 
@@ -448,7 +486,7 @@ class AdbClient(
 
     private fun forceCloseNow() {
         val oldSocket: Socket?
-        val oldTransport: TelnetShellTransport?
+        val oldTransport: TelnetCommandTransport?
         synchronized(connectionGuard) {
             oldSocket = socket
             oldTransport = telnetTransport
@@ -507,6 +545,10 @@ class AdbClient(
         private const val MAX_TIMEOUT_OUTPUT_CHARS = 2_000
         private const val RECONNECT_DELAY_MS = 3_000L
         private const val MAX_RECONNECT_RETRIES = 5
+        private const val TELNET_DISCOVERY_ATTEMPT_TIMEOUT_MS = 15_000L
+        private const val TELNET_AUTO_APPLY_READY_TIMEOUT_MS = 90_000L
+        private const val TELNET_READY_RETRY_DELAY_MS = 3_000L
+        private const val NANOS_PER_MILLISECOND = 1_000_000L
     }
 
     private data class AdbEndpointSnapshot(val host: String, val port: Int)

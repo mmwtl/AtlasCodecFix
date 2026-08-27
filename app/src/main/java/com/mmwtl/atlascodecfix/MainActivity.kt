@@ -228,7 +228,7 @@ private fun CodecFixScreen(
                 modifier = Modifier.fillMaxWidth(),
                 value = state.adbPortText,
                 onValueChange = onPortChange,
-                enabled = !state.isBusy && state.adbMode != AdbEndpointMode.TELNET,
+                enabled = !state.isBusy,
                 label = { Text(stringResource(R.string.adb_port)) },
                 supportingText = if (state.adbMode == AdbEndpointMode.TELNET) {
                     { Text(stringResource(R.string.adb_port_telnet)) }

@@ -11,18 +11,23 @@ import java.net.SocketTimeoutException
 import java.nio.charset.StandardCharsets
 
 /** A small, bounded telnet shell transport used by the GInputBridge-compatible endpoint mode. */
+internal interface TelnetCommandTransport : Closeable {
+    fun isClosed(): Boolean
+    fun exec(command: String, marker: String, timeoutMs: Long): Pair<String, Int>
+}
+
 internal class TelnetShellTransport private constructor(
     private val socket: Socket,
     private val input: InputStream,
     private val output: OutputStream
-) : Closeable {
+) : TelnetCommandTransport {
     @Volatile
     private var closed = false
 
-    fun isClosed(): Boolean = closed || socket.isClosed
+    override fun isClosed(): Boolean = closed || socket.isClosed
 
     @Synchronized
-    fun exec(command: String, marker: String, timeoutMs: Long): Pair<String, Int> {
+    override fun exec(command: String, marker: String, timeoutMs: Long): Pair<String, Int> {
         check(!isClosed()) { "Telnet is closed" }
 
         val effectiveCommand = if (command.trimEnd().endsWith(";")) {

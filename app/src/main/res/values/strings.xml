@@ -17,7 +17,7 @@
     <string name="adb_host">Адрес ADB</string>
     <string name="adb_host_hint">Для головного устройства обычно localhost</string>
     <string name="adb_port">Порт ADB</string>
-    <string name="adb_port_telnet">Telnet: порт определяется автоматически</string>
+    <string name="adb_port_telnet">Необязательно: оставьте пустым для автоопределения Telnet-порта</string>
     <string name="adb_mode_atlas">Atlas</string>
     <string name="adb_mode_preface">Preface</string>
     <string name="adb_mode_custom">Custom</string>

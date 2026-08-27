@@ -46,7 +46,14 @@ class CodecFixViewModel(
     fun setAdbHost(text: String) {
         val sanitized = text.trim().take(MAX_HOST_LENGTH)
         _state.update { it.copy(adbHostText = sanitized) }
-        if (sanitized.isNotBlank()) app.prefs.adbHost = sanitized
+        if (sanitized.isNotBlank()) {
+            app.prefs.adbHost = sanitized
+            if (_state.value.adbMode == AdbEndpointMode.TELNET &&
+                app.prefs.lastTelnetPort != null
+            ) {
+                app.prefs.lastTelnetHost = sanitized
+            }
+        }
     }
 
     fun setAdbMode(mode: AdbEndpointMode) {
@@ -63,7 +70,11 @@ class CodecFixViewModel(
         _state.update {
             it.copy(
                 adbMode = mode,
-                adbPortText = if (mode == AdbEndpointMode.TELNET) "" else port.toString()
+                adbPortText = if (mode == AdbEndpointMode.TELNET) {
+                    app.prefs.lastTelnetPort?.toString().orEmpty()
+                } else {
+                    port.toString()
+                }
             )
         }
         if (current.adbMode != mode && app.prefs.adbEnabled) {
@@ -79,6 +90,13 @@ class CodecFixViewModel(
 
     fun setAdbPort(text: String) {
         val sanitized = text.filter(Char::isDigit).take(5)
+        if (_state.value.adbMode == AdbEndpointMode.TELNET) {
+            val telnetPort = sanitized.toIntOrNull()?.takeIf { it in 1..65_535 }
+            _state.update { it.copy(adbPortText = sanitized) }
+            app.prefs.lastTelnetPort = telnetPort
+            if (telnetPort != null) app.prefs.lastTelnetHost = app.prefs.adbHost
+            return
+        }
         _state.update {
             it.copy(
                 adbPortText = sanitized,
@@ -94,9 +112,11 @@ class CodecFixViewModel(
         viewModelScope.launch {
             val endpoint = _state.value
             val port = endpoint.adbPortText.toIntOrNull()
-            if (endpoint.adbMode != AdbEndpointMode.TELNET &&
-                (endpoint.adbHostText.isBlank() || port == null || port !in 1..65535)
-            ) {
+            val invalidTelnetPort = endpoint.adbMode == AdbEndpointMode.TELNET &&
+                endpoint.adbPortText.isNotBlank() && (port == null || port !in 1..65_535)
+            val invalidAdbEndpoint = endpoint.adbMode != AdbEndpointMode.TELNET &&
+                (endpoint.adbHostText.isBlank() || port == null || port !in 1..65_535)
+            if (invalidTelnetPort || invalidAdbEndpoint) {
                 _state.update { it.copy(status = text(R.string.adb_endpoint_invalid)) }
                 return@launch
             }
@@ -431,10 +451,11 @@ class CodecFixViewModel(
         return CodecFixScreenState(
             adbEnabled = prefs.adbEnabled,
             adbHostText = prefs.adbHost,
-            adbPortText = prefs.adbPort
-                .takeUnless { it == AdbEndpoint.TELNET_PORT }
-                ?.toString()
-                .orEmpty(),
+            adbPortText = if (prefs.adbPort == AdbEndpoint.TELNET_PORT) {
+                prefs.lastTelnetPort?.toString().orEmpty()
+            } else {
+                prefs.adbPort.toString()
+            },
             adbMode = AdbEndpoint.modeForPort(prefs.adbPort),
             autoApplyCodecFix = prefs.autoApplyCodecFix,
             autoApplyDelayText = prefs.autoApplyDelaySeconds.toString(),
