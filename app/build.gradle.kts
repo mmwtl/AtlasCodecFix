@@ -10,8 +10,8 @@ val secureSigningScript = providers.gradleProperty("secure.signing")
     .orNull
     ?.let(rootProject::file)
 val hasReleaseSigning = secureSigningScript?.isFile == true
-val baseVersionCode = 40
-val baseVersionName = "1.4.0"
+val baseVersionCode = 41
+val baseVersionName = "1.4.1"
 
 fun currentGitBranch(): String {
     return runCatching {
@@ -42,7 +42,7 @@ val appVersionName = if (buildBranch == "main") {
 }
 
 base {
-    archivesName.set("$appVersionName[$baseVersionCode]AtlasCodecFix")
+    archivesName.set("$appVersionName[$baseVersionCode]AtlasMediaWidget")
 }
 
 android {

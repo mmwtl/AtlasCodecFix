@@ -150,7 +150,7 @@ ANDROID_HOME=/path/to/android-sdk sh gradlew :app:assembleRelease
 Без настроенной приватной подписи сборка release-варианта завершается ошибкой; проект не
 подменяет release-ключ стандартным debug-ключом. Итоговый APK создаётся в
 `app/build/outputs/apk/release/` с именем вида
-`<versionName>[<versionCode>]AtlasCodecFix-release.apk`.
+`<versionName>[<versionCode>]AtlasMediaWidget-release.apk`.
 
 Проверьте подпись собранного release APK:
 
