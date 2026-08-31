@@ -15,7 +15,7 @@ These instructions apply to the entire repository.
   project produces that artifact.
 - Never include the branch name or its suffix in `versionCode`.
 - Preserve artifact naming through the effective version using
-  `<effectiveVersionName>[<versionCode>]AtlasMediaWidget`.
+  `<effectiveVersionName>[<versionCode>]AtlasCodecFix`.
 
 ## Project purpose
 

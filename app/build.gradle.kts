@@ -42,7 +42,7 @@ val appVersionName = if (buildBranch == "main") {
 }
 
 base {
-    archivesName.set("$appVersionName[$baseVersionCode]AtlasMediaWidget")
+    archivesName.set("$appVersionName[$baseVersionCode]AtlasCodecFix")
 }
 
 android {
