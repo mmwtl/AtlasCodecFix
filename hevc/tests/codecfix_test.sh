@@ -201,6 +201,14 @@ assert_file_text() {
     }
 }
 
+printf '%s\n' "unrelated|$TARGET_CODECS.backup|none" > "$STATE_FILE"
+sh "$HEVC_DIR/detect.sh" > "$TMP_ROOT/detect-unrelated-mount.out"
+assert_contains 'variant:msmnile' "$TMP_ROOT/detect-unrelated-mount.out"
+sh "$HEVC_DIR/restore.sh" > "$TMP_ROOT/restore-unrelated-mount.out"
+assert_contains 'status:ok' "$TMP_ROOT/restore-unrelated-mount.out"
+[ "$(sed -n '1p' "$STATE_FILE")" = "unrelated|$TARGET_CODECS.backup|none" ]
+: > "$STATE_FILE"
+
 sh "$HEVC_DIR/codecfix.sh" min > "$TMP_ROOT/min.out"
 assert_contains 'status:ok' "$TMP_ROOT/min.out"
 assert_contains 'variant:min' "$TMP_ROOT/min.out"
@@ -246,6 +254,17 @@ assert_contains 'variant:msmnile' "$TMP_ROOT/restore.out"
 assert_contains "phase:unmount:$TARGET_CODECS:attempt:1" "$TMP_ROOT/restore.out"
 assert_contains "phase:command_timeout:umount -l $TARGET_CODECS" "$TMP_ROOT/restore.out"
 assert_not_contains '0.1' "$SLEEP_LOG"
+assert_file_text 'stock-codecs c2.qti.hevc' "$TARGET_CODECS"
+[ ! -s "$STATE_FILE" ]
+
+sh "$HEVC_DIR/codecfix.sh" min > "$TMP_ROOT/min-before-direct-bounded-restore.out"
+export HEVC_COMMAND_TIMEOUT_SECONDS=1
+export HANG_LAZY_UMOUNT_TARGET="$TARGET_CODECS"
+direct_restore_started_at="$(date +%s)"
+sh "$HEVC_DIR/restore.sh" > "$TMP_ROOT/direct-bounded-restore.out"
+unset HANG_LAZY_UMOUNT_TARGET HEVC_COMMAND_TIMEOUT_SECONDS
+assert_elapsed_less_than 5 "$direct_restore_started_at" 'Direct restore'
+assert_contains "phase:command_timeout:umount -l $TARGET_CODECS" "$TMP_ROOT/direct-bounded-restore.out"
 assert_file_text 'stock-codecs c2.qti.hevc' "$TARGET_CODECS"
 [ ! -s "$STATE_FILE" ]
 

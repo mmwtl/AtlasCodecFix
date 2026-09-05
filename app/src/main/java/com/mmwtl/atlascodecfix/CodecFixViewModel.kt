@@ -27,12 +27,25 @@ class CodecFixViewModel(
             }
         }
         if (app.prefs.adbEnabled) {
-            connectAdb()
-            refreshCurrentVariant()
+            launchOperation(text(R.string.adb_connecting)) {
+                val connected = app.adbClient.reconnect()
+                val connectionStatus = text(
+                    if (connected) R.string.adb_connected else R.string.adb_connect_failed
+                )
+                if (!connected) {
+                    notifyError(text(R.string.error_title_adb_connection), connectionStatus)
+                    _state.update { it.copy(status = connectionStatus) }
+                    return@launchOperation
+                }
+
+                _state.update { it.copy(status = text(R.string.checking_current_fix)) }
+                refreshCurrentVariantLocked()
+            }
         }
     }
 
     fun setAdbEnabled(enabled: Boolean) {
+        if (_state.value.isBusy) return
         app.prefs.adbEnabled = enabled
         _state.update { it.copy(adbEnabled = enabled) }
         if (enabled) {
@@ -44,6 +57,7 @@ class CodecFixViewModel(
     }
 
     fun setAdbHost(text: String) {
+        if (_state.value.isBusy) return
         val sanitized = text.trim().take(MAX_HOST_LENGTH)
         _state.update { it.copy(adbHostText = sanitized) }
         if (sanitized.isNotBlank()) {
@@ -57,6 +71,7 @@ class CodecFixViewModel(
     }
 
     fun setAdbMode(mode: AdbEndpointMode) {
+        if (_state.value.isBusy) return
         val current = _state.value
         val port = when (mode) {
             AdbEndpointMode.ATLAS -> AdbEndpoint.ATLAS_PORT
@@ -78,17 +93,17 @@ class CodecFixViewModel(
             )
         }
         if (current.adbMode != mode && app.prefs.adbEnabled) {
-            viewModelScope.launch {
-                _state.update { it.copy(isBusy = true, status = text(R.string.adb_connecting)) }
+            launchOperation(text(R.string.adb_connecting)) {
                 val connected = app.adbClient.reconnect()
                 val status = text(if (connected) R.string.adb_connected else R.string.adb_connect_failed)
                 if (!connected) notifyError(text(R.string.error_title_adb_connection), status)
-                _state.update { it.copy(isBusy = false, status = status) }
+                _state.update { it.copy(status = status) }
             }
         }
     }
 
     fun setAdbPort(text: String) {
+        if (_state.value.isBusy) return
         val sanitized = text.filter(Char::isDigit).take(5)
         if (_state.value.adbMode == AdbEndpointMode.TELNET) {
             val telnetPort = sanitized.toIntOrNull()?.takeIf { it in 1..65_535 }
@@ -109,18 +124,19 @@ class CodecFixViewModel(
     }
 
     fun connectAdb() {
-        viewModelScope.launch {
-            val endpoint = _state.value
-            val port = endpoint.adbPortText.toIntOrNull()
-            val invalidTelnetPort = endpoint.adbMode == AdbEndpointMode.TELNET &&
-                endpoint.adbPortText.isNotBlank() && (port == null || port !in 1..65_535)
-            val invalidAdbEndpoint = endpoint.adbMode != AdbEndpointMode.TELNET &&
-                (endpoint.adbHostText.isBlank() || port == null || port !in 1..65_535)
-            if (invalidTelnetPort || invalidAdbEndpoint) {
-                _state.update { it.copy(status = text(R.string.adb_endpoint_invalid)) }
-                return@launch
-            }
+        if (_state.value.isBusy) return
+        val endpoint = _state.value
+        val port = endpoint.adbPortText.toIntOrNull()
+        val invalidTelnetPort = endpoint.adbMode == AdbEndpointMode.TELNET &&
+            endpoint.adbPortText.isNotBlank() && (port == null || port !in 1..65_535)
+        val invalidAdbEndpoint = endpoint.adbMode != AdbEndpointMode.TELNET &&
+            (!AdbEndpoint.isValidHost(endpoint.adbHostText) || port == null || port !in 1..65_535)
+        if (invalidTelnetPort || invalidAdbEndpoint) {
+            _state.update { it.copy(status = text(R.string.adb_endpoint_invalid)) }
+            return
+        }
 
+        launchOperation(text(R.string.adb_connecting)) {
             val connected = app.adbClient.reconnect()
             val status = text(if (connected) R.string.adb_connected else R.string.adb_connect_failed)
             if (!connected) notifyError(text(R.string.error_title_adb_connection), status)
@@ -129,13 +145,14 @@ class CodecFixViewModel(
     }
 
     fun disconnectAdb() {
-        viewModelScope.launch {
+        launchOperation(text(R.string.adb_disconnecting)) {
             app.adbClient.disconnect()
             _state.update { it.copy(status = text(R.string.adb_disconnected)) }
         }
     }
 
     fun selectVariant(variant: HevcCodecFixVariant) {
+        if (_state.value.isBusy) return
         app.prefs.selectedVariant = variant
         var codecAutoApplyDisabled = false
         if (
@@ -161,13 +178,13 @@ class CodecFixViewModel(
     }
 
     fun setAutoApplyCodecFix(enabled: Boolean) {
-        viewModelScope.launch {
+        launchOperation {
             val current = _state.value
             if (enabled && !current.adbEnabled) {
                 _state.update {
                     it.copy(autoApplyCodecFix = false, status = text(R.string.enable_adb_first))
                 }
-                return@launch
+                return@launchOperation
             }
             val targetVariant = current.effectiveAutoApplyVariant
             if (enabled && targetVariant.experimental && !current.skipCompatibilityCheck) {
@@ -177,7 +194,7 @@ class CodecFixViewModel(
                         status = text(R.string.auto_requires_unsafe, targetVariant.title)
                     )
                 }
-                return@launch
+                return@launchOperation
             }
 
             if (
@@ -185,7 +202,7 @@ class CodecFixViewModel(
                 targetVariant != HevcCodecFixVariant.DEFAULT &&
                 !current.skipCompatibilityCheck
             ) {
-                _state.update { it.copy(isBusy = true, status = text(R.string.checking_compatibility)) }
+                _state.update { it.copy(status = text(R.string.checking_compatibility)) }
                 val compatibility = app.codecFixRepository.checkCompatibility()
                 if (!compatibility.autoApplyAllowed) {
                     val status = compatibility.output.trim().takeLast(STATUS_TEXT_LIMIT)
@@ -193,9 +210,9 @@ class CodecFixViewModel(
                     app.prefs.autoApplyCodecFix = false
                     notifyError(text(R.string.error_title_auto_unavailable), status)
                     _state.update {
-                        it.copy(autoApplyCodecFix = false, isBusy = false, status = status)
+                        it.copy(autoApplyCodecFix = false, status = status)
                     }
-                    return@launch
+                    return@launchOperation
                 }
             }
 
@@ -205,7 +222,6 @@ class CodecFixViewModel(
             _state.update {
                 it.copy(
                     autoApplyCodecFix = enabled,
-                    isBusy = false,
                     status = if (enabled) {
                         text(R.string.auto_enabled_for, it.effectiveAutoApplyVariant.title)
                     } else {
@@ -217,6 +233,7 @@ class CodecFixViewModel(
     }
 
     fun setAutoApplyDelay(text: String) {
+        if (_state.value.isBusy) return
         val sanitized = text.filter(Char::isDigit).take(4)
         _state.update { it.copy(autoApplyDelayText = sanitized) }
         val seconds = AutoApplyDelay.parse(sanitized) ?: return
@@ -224,6 +241,7 @@ class CodecFixViewModel(
     }
 
     fun setSkipCompatibilityCheck(enabled: Boolean) {
+        if (_state.value.isBusy) return
         app.prefs.skipCompatibilityCheck = enabled
         var codecAutoApplyDisabled = false
         if (
@@ -277,31 +295,14 @@ class CodecFixViewModel(
     }
 
     fun refreshCurrentVariant() {
-        viewModelScope.launch {
-            _state.update { it.copy(isBusy = true, status = text(R.string.checking_current_fix)) }
-            val detected = app.codecFixRepository.detectCurrentVariant()
-            val status = if (detected.commandSuccess) {
-                text(
-                    R.string.current_variant,
-                    detected.variant?.title ?: text(R.string.variant_unknown)
-                )
-            } else {
-                detected.output.trim().takeLast(STATUS_TEXT_LIMIT)
-                    .ifBlank { text(R.string.check_not_completed) }
-            }
-            if (!detected.commandSuccess) notifyError(text(R.string.error_title_fix_check), status)
-            _state.update {
-                it.copy(
-                    currentVariant = detected.variant,
-                    isBusy = false,
-                    status = status
-                )
-            }
+        launchOperation(text(R.string.checking_current_fix)) {
+            refreshCurrentVariantLocked()
         }
     }
 
     fun requestApplySelectedVariant() {
         val current = _state.value
+        if (current.isBusy) return
         if (!current.adbEnabled) {
             _state.update { it.copy(status = text(R.string.adb_disabled_message)) }
             return
@@ -324,6 +325,7 @@ class CodecFixViewModel(
     }
 
     fun confirmApply() {
+        if (_state.value.isBusy) return
         val confirmation = _state.value.confirmation ?: return
         _state.update { it.copy(confirmation = null) }
         applyVariant(
@@ -334,17 +336,17 @@ class CodecFixViewModel(
     }
 
     fun dismissApplyConfirmation() {
+        if (_state.value.isBusy) return
         _state.update { it.copy(confirmation = null) }
     }
 
     fun runPreflightCheck() {
-        viewModelScope.launch {
+        launchOperation(text(R.string.running_preflight)) {
             if (!_state.value.adbEnabled) {
                 _state.update { it.copy(status = text(R.string.adb_disabled_message)) }
-                return@launch
+                return@launchOperation
             }
 
-            _state.update { it.copy(isBusy = true, status = text(R.string.running_preflight)) }
             val result = app.codecFixRepository.checkCompatibility()
             val report = result.output.trim().takeLast(PREFLIGHT_REPORT_LIMIT)
                 .ifBlank { text(R.string.preflight_no_output) }
@@ -354,7 +356,6 @@ class CodecFixViewModel(
             _state.update {
                 it.copy(
                     currentVariant = result.variant ?: it.currentVariant,
-                    isBusy = false,
                     status = report
                 )
             }
@@ -362,13 +363,12 @@ class CodecFixViewModel(
     }
 
     fun runDiagnostics() {
-        viewModelScope.launch {
+        launchOperation(text(R.string.running_diagnostics)) {
             if (!_state.value.adbEnabled) {
                 _state.update { it.copy(status = text(R.string.adb_disabled_message)) }
-                return@launch
+                return@launchOperation
             }
 
-            _state.update { it.copy(isBusy = true, status = text(R.string.running_diagnostics)) }
             val result = app.codecFixRepository.collectDiagnostics()
             val report = result.output.trim().takeLast(DIAGNOSTICS_REPORT_LIMIT)
                 .ifBlank { text(R.string.diagnostics_no_output) }
@@ -378,7 +378,6 @@ class CodecFixViewModel(
             _state.update {
                 it.copy(
                     currentVariant = result.variant ?: it.currentVariant,
-                    isBusy = false,
                     status = report
                 )
             }
@@ -386,13 +385,12 @@ class CodecFixViewModel(
     }
 
     fun exportAnalysisBundle() {
-        viewModelScope.launch {
+        launchOperation(text(R.string.running_analysis_export)) {
             if (!_state.value.adbEnabled) {
                 _state.update { it.copy(status = text(R.string.adb_disabled_message)) }
-                return@launch
+                return@launchOperation
             }
 
-            _state.update { it.copy(isBusy = true, status = text(R.string.running_analysis_export)) }
             val result = app.codecFixRepository.exportAnalysisBundle()
             val report = result.output.trim().takeLast(DIAGNOSTICS_REPORT_LIMIT)
                 .ifBlank { text(R.string.analysis_export_no_output) }
@@ -401,7 +399,6 @@ class CodecFixViewModel(
             }
             _state.update {
                 it.copy(
-                    isBusy = false,
                     status = if (result.commandSuccess) {
                         text(R.string.analysis_export_succeeded, result.exportPath)
                     } else {
@@ -413,10 +410,11 @@ class CodecFixViewModel(
     }
 
     fun loadAvailableCodecs() {
+        if (_state.value.isCodecListLoading) return
+        _state.update {
+            it.copy(isCodecListLoading = true, codecListStatus = text(R.string.collecting_codecs))
+        }
         viewModelScope.launch {
-            _state.update {
-                it.copy(isCodecListLoading = true, codecListStatus = text(R.string.collecting_codecs))
-            }
             val result = withContext(Dispatchers.Default) {
                 runCatching { collectAvailableCodecs() }
             }
@@ -471,15 +469,42 @@ class CodecFixViewModel(
         }
     }
 
+    private fun launchOperation(
+        status: String? = null,
+        block: suspend () -> Unit
+    ) {
+        if (_state.value.isBusy) return
+        _state.update { it.copy(isBusy = true, status = status ?: it.status) }
+        viewModelScope.launch {
+            try {
+                block()
+            } finally {
+                _state.update { it.copy(isBusy = false) }
+            }
+        }
+    }
+
+    private suspend fun refreshCurrentVariantLocked() {
+        val detected = app.codecFixRepository.detectCurrentVariant()
+        val status = if (detected.commandSuccess) {
+            text(
+                R.string.current_variant,
+                detected.variant?.title ?: text(R.string.variant_unknown)
+            )
+        } else {
+            detected.output.trim().takeLast(STATUS_TEXT_LIMIT)
+                .ifBlank { text(R.string.check_not_completed) }
+        }
+        if (!detected.commandSuccess) notifyError(text(R.string.error_title_fix_check), status)
+        _state.update { it.copy(currentVariant = detected.variant, status = status) }
+    }
+
     private fun applyVariant(
         variant: HevcCodecFixVariant,
         allowRisky: Boolean,
         allowExperimental: Boolean
     ) {
-        viewModelScope.launch {
-            _state.update {
-                it.copy(isBusy = true, status = text(R.string.applying_variant, variant.title))
-            }
+        launchOperation(text(R.string.applying_variant, variant.title)) {
             val result = app.codecFixRepository.applyVariant(
                 variant = variant,
                 allowRisky = allowRisky,
@@ -493,13 +518,12 @@ class CodecFixViewModel(
             ) {
                 _state.update {
                     it.copy(
-                        isBusy = false,
                         confirmation = ApplyConfirmation(variant, ConfirmationReason.RISKY),
                         status = result.compatibility.reason
                             ?: text(R.string.compatibility_not_confirmed)
                     )
                 }
-                return@launch
+                return@launchOperation
             }
 
             if (result.success) app.prefs.selectedVariant = variant
@@ -528,7 +552,6 @@ class CodecFixViewModel(
             _state.update {
                 it.copy(
                     currentVariant = result.detectedVariant,
-                    isBusy = false,
                     status = status
                 )
             }

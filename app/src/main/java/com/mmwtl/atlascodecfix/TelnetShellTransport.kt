@@ -46,7 +46,7 @@ internal class TelnetShellTransport private constructor(
                 throw IOException("Telnet stream closed before completion marker")
             }
             if (byte == IAC) {
-                handleNegotiation(deadlineNanos)
+                handleTelnetCommand(deadlineNanos, collected)
                 continue
             }
             if (byte == '\r'.code) continue
@@ -83,18 +83,44 @@ internal class TelnetShellTransport private constructor(
         }
     }
 
-    private fun handleNegotiation(deadlineNanos: Long) {
+    private fun handleTelnetCommand(
+        deadlineNanos: Long,
+        collected: ByteArrayOutputStream
+    ) {
         val command = readByteUntil(deadlineNanos)
-        val option = readByteUntil(deadlineNanos)
-        if (command == WILL || command == DO) {
-            output.write(
-                byteArrayOf(
-                    IAC.toByte(),
-                    if (command == WILL) WONT.toByte() else DONT.toByte(),
-                    option.toByte()
-                )
-            )
-            output.flush()
+        when (command) {
+            IAC -> collected.write(IAC)
+            WILL, WONT, DO, DONT -> {
+                val option = readByteUntil(deadlineNanos)
+                refusalFor(command)?.takeIf { option >= 0 }?.let { refusal ->
+                    output.write(
+                        byteArrayOf(
+                            IAC.toByte(),
+                            refusal.toByte(),
+                            option.toByte()
+                        )
+                    )
+                    output.flush()
+                }
+            }
+            SB -> {
+                drainSubnegotiation(deadlineNanos)
+            }
+            // NOP, IP, AO, and the other one-byte Telnet commands carry no option byte.
+            else -> Unit
+        }
+    }
+
+    private fun drainSubnegotiation(deadlineNanos: Long) {
+        while (true) {
+            val byte = readByteUntil(deadlineNanos)
+            if (byte < 0) return
+            if (byte != IAC) continue
+            when (readByteUntil(deadlineNanos)) {
+                IAC -> Unit
+                SE -> return
+                else -> Unit
+            }
         }
     }
 
@@ -132,9 +158,11 @@ internal class TelnetShellTransport private constructor(
         private const val NANOS_PER_MILLISECOND = 1_000_000L
         private const val IAC = 0xFF
         private const val WILL = 0xFB
-        private const val WONT = 0xFC
         private const val DO = 0xFD
         private const val DONT = 0xFE
+        private const val WONT = 0xFC
+        private const val SB = 0xFA
+        private const val SE = 0xF0
         private const val TRAILING_DRAIN_TIMEOUT_MS = 200
 
         fun connect(host: String, port: Int): TelnetShellTransport {
@@ -152,28 +180,70 @@ internal class TelnetShellTransport private constructor(
         }
 
         private fun drainBanner(socket: Socket, input: InputStream, output: OutputStream) {
-            socket.soTimeout = BANNER_DRAIN_TIMEOUT_MS
+            val deadlineNanos = System.nanoTime() +
+                BANNER_DRAIN_TIMEOUT_MS * NANOS_PER_MILLISECOND
             while (true) {
-                val first = try {
-                    input.read()
-                } catch (_: SocketTimeoutException) {
-                    return
-                }
-                if (first == -1) return
+                val first = readBannerByte(socket, input, deadlineNanos) ?: return
+                if (first < 0) return
                 if (first != IAC) continue
+                if (!drainBannerTelnetCommand(socket, input, output, deadlineNanos)) return
+            }
+        }
 
-                val command = input.read()
-                val option = input.read()
-                if ((command == WILL || command == DO) && option >= 0) {
-                    output.write(
-                        byteArrayOf(
-                            IAC.toByte(),
-                            if (command == WILL) WONT.toByte() else DONT.toByte(),
-                            option.toByte()
+        private fun drainBannerTelnetCommand(
+            socket: Socket,
+            input: InputStream,
+            output: OutputStream,
+            deadlineNanos: Long
+        ): Boolean {
+            val command = readBannerByte(socket, input, deadlineNanos) ?: return false
+            if (command < 0) return false
+            when (command) {
+                IAC -> return true
+                WILL, WONT, DO, DONT -> {
+                    val option = readBannerByte(socket, input, deadlineNanos) ?: return false
+                    if (option < 0) return false
+                    refusalFor(command)?.let { refusal ->
+                        output.write(
+                            byteArrayOf(
+                                IAC.toByte(),
+                                refusal.toByte(),
+                                option.toByte()
+                            )
                         )
-                    )
-                    output.flush()
+                        output.flush()
+                    }
                 }
+                SB -> {
+                    while (true) {
+                        val byte = readBannerByte(socket, input, deadlineNanos) ?: return false
+                        if (byte < 0) return false
+                        if (byte != IAC) continue
+                        when (readBannerByte(socket, input, deadlineNanos) ?: return false) {
+                            IAC -> Unit
+                            SE -> return true
+                            else -> Unit
+                        }
+                    }
+                }
+                else -> return true
+            }
+            return true
+        }
+
+        private fun readBannerByte(
+            socket: Socket,
+            input: InputStream,
+            deadlineNanos: Long
+        ): Int? {
+            val remainingMs = ((deadlineNanos - System.nanoTime()) / NANOS_PER_MILLISECOND)
+                .coerceAtLeast(1L)
+            if (System.nanoTime() >= deadlineNanos) return null
+            socket.soTimeout = remainingMs.coerceAtMost(BANNER_DRAIN_TIMEOUT_MS.toLong()).toInt()
+            return try {
+                input.read()
+            } catch (_: SocketTimeoutException) {
+                null
             }
         }
 
@@ -192,4 +262,10 @@ internal class TelnetShellTransport private constructor(
 
         private const val BANNER_DRAIN_TIMEOUT_MS = 500
     }
+}
+
+private fun refusalFor(command: Int): Int? = when (command) {
+    0xFB -> 0xFE // WILL -> DONT
+    0xFD -> 0xFC // DO -> WONT
+    else -> null
 }

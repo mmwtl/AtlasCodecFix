@@ -23,4 +23,14 @@ class AdbEndpointTest {
         assertFalse(AdbEndpoint.isValidPort(-1))
         assertFalse(AdbEndpoint.isValidPort(65_536))
     }
+
+    @Test
+    fun hostValidationRejectsBlankWhitespaceAndControlCharacters() {
+        assertTrue(AdbEndpoint.isValidHost("localhost"))
+        assertTrue(AdbEndpoint.isValidHost("127.0.0.1"))
+        assertFalse(AdbEndpoint.isValidHost(""))
+        assertFalse(AdbEndpoint.isValidHost("head unit"))
+        assertFalse(AdbEndpoint.isValidHost("head\nunit"))
+        assertFalse(AdbEndpoint.isValidHost("a".repeat(254)))
+    }
 }

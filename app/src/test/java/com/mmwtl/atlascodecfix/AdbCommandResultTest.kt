@@ -65,6 +65,18 @@ class AdbCommandResultTest {
     }
 
     @Test
+    fun timeoutMessageRoundsShortTimeoutUpToOneSecond() {
+        assertEquals(
+            "ADB command timed out after 1s",
+            AdbClient.timeoutMessage(timeoutMs = 250, partialOutput = "")
+        )
+        assertEquals(
+            "ADB command timed out after 1s",
+            AdbClient.timeoutMessage(timeoutMs = -1, partialOutput = "")
+        )
+    }
+
+    @Test
     fun commandDeadlinePhysicallyClosesTransport() {
         val scheduler = Executors.newSingleThreadScheduledExecutor()
         val closed = CountDownLatch(1)
@@ -83,4 +95,5 @@ class AdbCommandResultTest {
             scheduler.shutdownNow()
         }
     }
+
 }

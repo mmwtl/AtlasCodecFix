@@ -13,6 +13,10 @@ object AdbEndpoint {
         return port == TELNET_PORT || port in 1..65_535
     }
 
+    fun isValidHost(host: String): Boolean {
+        return host.length in 1..253 && host.none { it.isWhitespace() || it.isISOControl() }
+    }
+
     fun modeForPort(port: Int): AdbEndpointMode {
         return when (port) {
             ATLAS_PORT -> AdbEndpointMode.ATLAS

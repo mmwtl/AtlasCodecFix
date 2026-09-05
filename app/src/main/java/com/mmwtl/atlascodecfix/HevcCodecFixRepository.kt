@@ -4,6 +4,9 @@ import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -181,7 +184,8 @@ class HevcCodecFixRepository internal constructor(
         requireAutoApplyAllowed: Boolean
     ): HevcCodecFixApplyResult {
         if (variant == HevcCodecFixVariant.MSMNILE) {
-            return restoreDefaultLocked()
+            currentCoroutineContext().ensureActive()
+            return withContext(NonCancellable) { restoreDefaultLocked() }
         }
 
         if (variant.experimental && !allowExperimental && !skipCompatibilityCheck) {
@@ -213,47 +217,63 @@ class HevcCodecFixRepository internal constructor(
             )
         }
 
-        val runResult = runCatching {
-            val stagingDir = assets.stage(variant)
-            adb.execute(buildApplyCommand(stagingDir, variant, skipCompatibilityCheck), APPLY_TIMEOUT_MS)
-        }.getOrElse { t ->
+        val stagingDir = try {
+            assets.stage(variant)
+        } catch (t: Throwable) {
             if (t is CancellationException) throw t
-            Log.e(TAG, "HEVC apply failed", t)
-            AdbCommandResult.failure(
-                AdbCommandFailureKind.TRANSPORT,
-                t.message ?: t.javaClass.simpleName
-            )
+            Log.e(TAG, "HEVC apply staging failed", t)
+            return failedApply(variant, t.message ?: t.javaClass.simpleName)
         }
 
-        val detected = detectCurrentVariantLocked()
-        val success = detected.variant == variant && runResult.succeeded
-        if (!success) {
-            val recovery = restoreDefaultLocked()
-            return HevcCodecFixApplyResult(
+        currentCoroutineContext().ensureActive()
+
+        // Once the root transaction starts, cancellation must not interrupt the apply/detect/
+        // rollback sequence. Otherwise the remote shell can finish after this coroutine is gone,
+        // leaving mounts in an unverified state.
+        return withContext(NonCancellable) {
+            val runResult = runCatching {
+                adb.execute(
+                    buildApplyCommand(stagingDir, variant, skipCompatibilityCheck),
+                    APPLY_TIMEOUT_MS
+                )
+            }.getOrElse { t ->
+                Log.e(TAG, "HEVC apply failed", t)
+                AdbCommandResult.failure(
+                    AdbCommandFailureKind.TRANSPORT,
+                    t.message ?: t.javaClass.simpleName
+                )
+            }
+
+            val detected = detectCurrentVariantLocked()
+            val success = detected.variant == variant && runResult.succeeded
+            if (!success) {
+                val recovery = restoreDefaultLocked()
+                return@withContext HevcCodecFixApplyResult(
+                    requestedVariant = variant,
+                    detectedVariant = recovery.detectedVariant,
+                    runOutput = runResult.displayOutput,
+                    detectOutput = detected.output,
+                    success = false,
+                    compatibility = compatibility,
+                    retryable = runResult.failure != null ||
+                        !detected.commandSuccess ||
+                        !recovery.success,
+                    recoveryOutput = listOf(recovery.runOutput, recovery.detectOutput)
+                        .filter(String::isNotBlank)
+                        .joinToString("\n"),
+                    restoredToDefault = recovery.success
+                )
+            }
+            HevcCodecFixApplyResult(
                 requestedVariant = variant,
-                detectedVariant = recovery.detectedVariant,
+                detectedVariant = detected.variant,
                 runOutput = runResult.displayOutput,
                 detectOutput = detected.output,
-                success = false,
+                success = success,
                 compatibility = compatibility,
-                retryable = runResult.failure != null ||
-                    !detected.commandSuccess ||
-                    !recovery.success,
-                recoveryOutput = listOf(recovery.runOutput, recovery.detectOutput)
-                    .filter(String::isNotBlank)
-                    .joinToString("\n"),
-                restoredToDefault = recovery.success
+                retryable = runResult.failure != null || !detected.commandSuccess
             )
         }
-        return HevcCodecFixApplyResult(
-            requestedVariant = variant,
-            detectedVariant = detected.variant,
-            runOutput = runResult.displayOutput,
-            detectOutput = detected.output,
-            success = success,
-            compatibility = compatibility,
-            retryable = runResult.failure != null || !detected.commandSuccess
-        )
     }
 
     private suspend fun restoreDefaultLocked(): HevcCodecFixApplyResult {
@@ -520,7 +540,12 @@ class HevcCodecFixRepository internal constructor(
 
     internal fun detectVariant(output: String): HevcCodecFixVariant? {
         val text = output.lowercase()
-        parseReportedVariant(text)?.let { return it }
+        // An explicit report is authoritative, including an unknown report. Falling back to
+        // msmnile for `variant:unknown` would turn a partial or unavailable mount state into a
+        // false Default result.
+        reportedVariantToken(text)?.let { token ->
+            return HevcCodecFixVariant.fromArgument(token)
+        }
         return when {
             "/dev/hevc/ultra/" in text -> HevcCodecFixVariant.ULTRA
             "/dev/hevc/max/" in text -> HevcCodecFixVariant.MAX
@@ -533,10 +558,14 @@ class HevcCodecFixRepository internal constructor(
     }
 
     private fun parseReportedVariant(output: String): HevcCodecFixVariant? {
-        val match = Regex("""(?:^|\s)variant:([a-z0-9_-]+)""", RegexOption.IGNORE_CASE)
+        return reportedVariantToken(output)?.let(HevcCodecFixVariant::fromArgument)
+    }
+
+    private fun reportedVariantToken(output: String): String? {
+        return Regex("""(?:^|\s)variant:([a-z0-9_-]+)""", RegexOption.IGNORE_CASE)
             .find(output)
-            ?: return null
-        return HevcCodecFixVariant.fromArgument(match.groupValues[1])
+            ?.groupValues
+            ?.getOrNull(1)
     }
 
     private fun parseCompatibilityStatus(output: String): HevcCodecFixCompatibilityStatus {

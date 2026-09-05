@@ -12,7 +12,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 class AutoApplyJobService : JobService() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // Keep completion and retry accounting serialized with JobService lifecycle callbacks.
+    // The client and repository move their blocking operations to Dispatchers.IO themselves.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var runningJob: Job? = null
 
     override fun onStartJob(params: JobParameters): Boolean {

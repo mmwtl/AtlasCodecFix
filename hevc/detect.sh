@@ -45,7 +45,24 @@ if [ ! -r "$MOUNT_TABLE" ]; then
     exit 0
 fi
 
-mounted_targets="$(grep -E "/vendor/etc/(media_codecs_msmnile.xml|media_codecs_performance_msmnile.xml|media_profiles_msmnile.xml|video_system_specs.json|media_msmnile/video_system_specs.json)" "$MOUNT_TABLE" 2>/dev/null || true)"
+collect_mounted_targets() {
+    while IFS= read -r line; do
+        matched=0
+        for target in \
+            "$TARGET_CODECS" \
+            "$TARGET_PERFORMANCE" \
+            "$TARGET_PROFILES" \
+            "$TARGET_SPECS" \
+            "$TARGET_MSMNILE_SPECS"; do
+            case "$line" in
+                *" $target "*|*"|$target|"*) matched=1; break ;;
+            esac
+        done
+        [ "$matched" = "1" ] && printf '%s\n' "$line"
+    done < "$MOUNT_TABLE"
+}
+
+mounted_targets="$(collect_mounted_targets)"
 if [ -z "$mounted_targets" ]; then
     echo "variant:msmnile"
     exit 0

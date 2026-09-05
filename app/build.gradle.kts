@@ -26,7 +26,10 @@ fun currentGitBranch(): String {
 }
 
 val buildBranch = providers.gradleProperty("branch.name").orNull
-    ?: System.getenv("GIT_BRANCH")?.substringAfterLast('/')
+    ?: System.getenv("GIT_BRANCH")
+        ?.removePrefix("refs/heads/")
+        ?.removePrefix("refs/remotes/")
+        ?.removePrefix("origin/")
     ?: currentGitBranch()
 val sanitizedBranch = buildBranch
     .ifBlank { "detached" }

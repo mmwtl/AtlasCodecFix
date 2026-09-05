@@ -532,7 +532,10 @@ class AdbClient(
         }
 
         internal fun timeoutMessage(timeoutMs: Long, partialOutput: String): String {
-            val headline = "ADB command timed out after ${timeoutMs / 1000}s"
+            val normalizedTimeoutMs = timeoutMs.coerceAtLeast(1L)
+            val seconds = normalizedTimeoutMs / 1_000L +
+                if (normalizedTimeoutMs % 1_000L == 0L) 0L else 1L
+            val headline = "ADB command timed out after ${seconds}s"
             val partial = partialOutput.trim().takeLast(MAX_TIMEOUT_OUTPUT_CHARS)
             return if (partial.isBlank()) headline else "$headline\nLast output:\n$partial"
         }

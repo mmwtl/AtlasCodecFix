@@ -75,7 +75,14 @@ restart_media() {
 }
 
 is_target_mounted() {
-    [ -r "$MOUNT_TABLE" ] && grep -F "$1" "$MOUNT_TABLE" >/dev/null 2>&1
+    target="$1"
+    [ -r "$MOUNT_TABLE" ] || return 1
+    while IFS= read -r line; do
+        case "$line" in
+            *" $target "*|*"|$target|"*) return 0 ;;
+        esac
+    done < "$MOUNT_TABLE"
+    return 1
 }
 
 unmount_target() {

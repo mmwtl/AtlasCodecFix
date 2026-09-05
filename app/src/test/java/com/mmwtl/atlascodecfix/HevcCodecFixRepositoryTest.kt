@@ -2,10 +2,13 @@ package com.mmwtl.atlascodecfix
 
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -98,6 +101,16 @@ class HevcCodecFixRepositoryTest {
     }
 
     @Test
+    fun explicitUnknownVariantDoesNotFallBackToDefault() {
+        val repository = HevcCodecFixRepository(
+            FakeAssets(temporaryFolder.root),
+            FakeAdbExecutor(HevcCodecFixVariant.MIN)
+        )
+
+        assertNull(repository.detectVariant("variant:unknown\nreason:partial_mount_set"))
+    }
+
+    @Test
     fun statusDetectionUsesOneDirectRootShellWithoutDeviceLock() = runBlocking {
         val assets = FakeAssets(temporaryFolder.newFolder("direct-status"))
         val adb = FakeAdbExecutor(detectedVariant = HevcCodecFixVariant.MIN)
@@ -179,6 +192,31 @@ class HevcCodecFixRepositoryTest {
         assertTrue(result.restoredToDefault)
         assertEquals(HevcCodecFixVariant.MSMNILE, result.detectedVariant)
         assertTrue(adb.commands.any { it.contains(FakeAssets.RESTORE_MARKER) })
+    }
+
+    @Test
+    fun cancellationDuringPostApplyDetectionFinishesRecoveryBeforeJobStops() = runBlocking {
+        val assets = FakeAssets(temporaryFolder.newFolder("cancelled-apply"))
+        val detectStarted = CompletableDeferred<Unit>()
+        val detectRelease = CompletableDeferred<Unit>()
+        val adb = CancelledDuringDetectionAdbExecutor(detectStarted, detectRelease)
+        val repository = HevcCodecFixRepository(assets, adb)
+
+        val job = launch {
+            repository.applyVariant(
+                variant = HevcCodecFixVariant.MIN,
+                skipCompatibilityCheck = true
+            )
+        }
+
+        detectStarted.await()
+        adb.returnUnknownDetection = true
+        job.cancel()
+        detectRelease.complete(Unit)
+        job.join()
+
+        assertTrue(adb.commands.any { it.contains(FakeAssets.RESTORE_MARKER) })
+        assertEquals(HevcCodecFixVariant.MSMNILE, adb.currentVariant)
     }
 
     @Test
@@ -358,6 +396,42 @@ class HevcCodecFixRepositoryTest {
                 else -> "variant:${currentVariant.argument}"
             }
             return AdbCommandResult(stdout = output, exitCode = 0)
+        }
+    }
+
+    private class CancelledDuringDetectionAdbExecutor(
+        private val detectStarted: CompletableDeferred<Unit>,
+        private val detectRelease: CompletableDeferred<Unit>
+    ) : AdbCommandExecutor {
+        val commands = mutableListOf<String>()
+        var currentVariant = HevcCodecFixVariant.MSMNILE
+        var returnUnknownDetection = false
+
+        override suspend fun execute(command: String, timeoutMs: Long): AdbCommandResult {
+            commands += command
+            return when {
+                command.contains("NEW_DIR=") -> {
+                    currentVariant = HevcCodecFixVariant.MIN
+                    AdbCommandResult(stdout = "status:ok", exitCode = 0)
+                }
+                command.contains(FakeAssets.RESTORE_MARKER) -> {
+                    currentVariant = HevcCodecFixVariant.MSMNILE
+                    AdbCommandResult(stdout = "status:ok", exitCode = 0)
+                }
+                command.contains("__TEST_DETECT_SCRIPT__") && !detectStarted.isCompleted -> {
+                    detectStarted.complete(Unit)
+                    detectRelease.await()
+                    AdbCommandResult(
+                        stdout = if (returnUnknownDetection) {
+                            "variant:unknown"
+                        } else {
+                            "variant:${currentVariant.argument}"
+                        },
+                        exitCode = 0
+                    )
+                }
+                else -> AdbCommandResult(stdout = "variant:${currentVariant.argument}", exitCode = 0)
+            }
         }
     }
 

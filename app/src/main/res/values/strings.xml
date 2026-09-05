@@ -44,11 +44,12 @@
     <string name="unsafe_mode_description">Пропустить preflight и разрешить автоприменение экспериментальных профилей</string>
 
     <string name="section_errors">Ошибки</string>
-    <string name="error_notifications">Ошибки уведомлениями</string>
+    <string name="error_notifications">Уведомления об ошибках</string>
     <string name="error_notifications_description">Показывать ошибки ADB, preflight и применения</string>
 
     <string name="adb_connected">ADB подключён</string>
     <string name="adb_connecting">ADB подключается</string>
+    <string name="adb_disconnecting">ADB отключается</string>
     <string name="adb_disconnected">ADB отключён</string>
     <string name="adb_error">ADB ошибка: %1$s</string>
     <string name="adb_endpoint_invalid">Укажите корректный адрес и порт ADB</string>
