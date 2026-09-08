@@ -1,9 +1,14 @@
 package com.mmwtl.atlascodecfix
 
 import android.Manifest
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
+import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -82,6 +87,7 @@ class MainActivity : ComponentActivity() {
                     onExportAnalysis = viewModel::exportAnalysisBundle,
                     onAutoApplyCodecFixChange = viewModel::setAutoApplyCodecFix,
                     onAutoApplyDelayChange = viewModel::setAutoApplyDelay,
+                    onOpenAccessibilitySettings = ::openAccessibilitySettings,
                     onSkipCompatibilityCheckChange = viewModel::setSkipCompatibilityCheck,
                     onLoadCodecs = viewModel::loadAvailableCodecs,
                     onHideCodecs = viewModel::hideAvailableCodecs,
@@ -107,6 +113,31 @@ class MainActivity : ComponentActivity() {
             viewModel.setErrorNotificationsEnabled(enabled)
         }
     }
+
+    private fun openAccessibilitySettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            return
+        } catch (error: ActivityNotFoundException) {
+            Log.w(TAG, "Accessibility settings screen is unavailable", error)
+        } catch (error: SecurityException) {
+            Log.w(TAG, "Accessibility settings screen is unavailable", error)
+        }
+
+        try {
+            startActivity(Intent(Settings.ACTION_SETTINGS))
+        } catch (error: ActivityNotFoundException) {
+            Log.w(TAG, "System settings screen is unavailable", error)
+            Toast.makeText(this, R.string.no_accessibility_settings, Toast.LENGTH_LONG).show()
+        } catch (error: SecurityException) {
+            Log.w(TAG, "System settings screen is unavailable", error)
+            Toast.makeText(this, R.string.no_accessibility_settings, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private companion object {
+        private const val TAG = "AtlasCodecFix"
+    }
 }
 
 @Composable
@@ -126,6 +157,7 @@ private fun CodecFixScreen(
     onExportAnalysis: () -> Unit,
     onAutoApplyCodecFixChange: (Boolean) -> Unit,
     onAutoApplyDelayChange: (String) -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
     onSkipCompatibilityCheckChange: (Boolean) -> Unit,
     onLoadCodecs: () -> Unit,
     onHideCodecs: () -> Unit,
@@ -376,6 +408,19 @@ private fun CodecFixScreen(
                 shape = RoundedCornerShape(8.dp),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
             )
+
+            Text(
+                text = stringResource(R.string.auto_apply_accessibility_hint),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !state.isBusy,
+                shape = RoundedCornerShape(8.dp),
+                onClick = onOpenAccessibilitySettings
+            ) {
+                Text(stringResource(R.string.open_accessibility_settings))
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),

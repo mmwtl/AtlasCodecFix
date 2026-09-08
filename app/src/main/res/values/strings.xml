@@ -81,6 +81,9 @@
     <string name="auto_apply_schedule_failed">Не удалось запланировать автоприменение</string>
     <string name="auto_apply_accessibility_label">Надёжный автозапуск Codec Fix</string>
     <string name="auto_apply_accessibility_description">Запускает проверку выбранного codec-профиля после загрузки и пробуждения ГУ. Не читает содержимое окон и не выполняет жесты.</string>
+    <string name="auto_apply_accessibility_hint">Для резервного запуска включите «Надёжный автозапуск Codec Fix» в специальных возможностях.</string>
+    <string name="open_accessibility_settings">Открыть специальные возможности</string>
+    <string name="no_accessibility_settings">В прошивке нет системного экрана специальных возможностей</string>
     <string name="unsafe_disabled_auto_disabled">Небезопасный режим выключен; автоприменение экспериментального профиля отключено</string>
     <string name="unsafe_enabled">Небезопасный режим включён</string>
     <string name="compatibility_enabled">Проверка совместимости включена</string>
