@@ -12,7 +12,11 @@ class AutoApplyReceiver : BroadcastReceiver() {
             return
         }
 
-        val scheduled = AutoApplyScheduler.sync(context, resetRetries = true)
+        val scheduled = if (intent.action == Intent.ACTION_USER_UNLOCKED) {
+            AutoApplyScheduler.ensureScheduled(context)
+        } else {
+            AutoApplyScheduler.sync(context, resetRetries = true)
+        }
         if (!scheduled) {
             val app = context.applicationContext as CodecFixApp
             app.errorNotifier.notify(
@@ -26,6 +30,7 @@ class AutoApplyReceiver : BroadcastReceiver() {
         private const val TAG = "AtlasCodecFix"
         private val ALLOWED_ACTIONS = setOf(
             Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_USER_UNLOCKED,
             Intent.ACTION_MY_PACKAGE_REPLACED
         )
     }

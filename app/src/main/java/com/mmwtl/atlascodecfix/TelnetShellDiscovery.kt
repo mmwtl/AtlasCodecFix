@@ -23,6 +23,9 @@ internal class TelnetShellDiscovery(
     @Volatile
     private var cachedEndpoint: TelnetShellEndpoint? = null
 
+    @Volatile
+    private var nextScanOffset = 0
+
     fun open(
         preferredEndpoint: TelnetShellEndpoint? = null,
         timeoutMs: Long = DISCOVERY_TIMEOUT_MS
@@ -31,6 +34,7 @@ internal class TelnetShellDiscovery(
         val candidates = LinkedHashSet<TelnetShellEndpoint>()
         cachedEndpoint?.let(candidates::add)
         preferredEndpoint?.takeIf { it.port in 1..65_535 }?.let(candidates::add)
+        val discoveredCandidates = mutableListOf<TelnetShellEndpoint>()
 
         val scanErrors = mutableListOf<String>()
         for (host in candidateHosts()) {
@@ -38,12 +42,21 @@ internal class TelnetShellDiscovery(
             runCatching { portSource.listeningPorts(host) }
                 .onSuccess { ports ->
                     ports.filter { it in 1..65_535 }
-                        .forEach { candidates += TelnetShellEndpoint(host, it) }
+                        .forEach { discoveredCandidates += TelnetShellEndpoint(host, it) }
                 }
                 .onFailure { error ->
                     scanErrors += "$host: ${error.safeMessage()}"
                     Log.w(TAG, "Unable to inspect listening ports on $host", error)
                 }
+        }
+
+        val scanOffset = if (discoveredCandidates.isEmpty()) {
+            0
+        } else {
+            nextScanOffset.mod(discoveredCandidates.size)
+        }
+        repeat(discoveredCandidates.size) { index ->
+            candidates += discoveredCandidates[(scanOffset + index) % discoveredCandidates.size]
         }
 
         var probed = 0
@@ -68,6 +81,9 @@ internal class TelnetShellDiscovery(
             candidates.isEmpty() -> "no local listening ports found"
             nanoTime() >= deadlineNanos -> "discovery timed out after ${timeoutMs}ms"
             else -> "$probed local ports checked"
+        }
+        if (discoveredCandidates.isNotEmpty()) {
+            nextScanOffset = (scanOffset + probed.coerceAtLeast(1)).mod(discoveredCandidates.size)
         }
         throw IOException("Telnet shell endpoint not found ($reason)")
     }
@@ -115,7 +131,7 @@ internal class TelnetShellDiscovery(
     internal data class TelnetShellEndpoint(val host: String, val port: Int)
 
     companion object {
-        private const val VALIDATION_TIMEOUT_MS = 1_000L
+        private const val VALIDATION_TIMEOUT_MS = 5_000L
         private const val DISCOVERY_TIMEOUT_MS = 15_000L
         private const val NANOS_PER_MILLISECOND = 1_000_000L
         private const val MAX_REPORTED_SCAN_ERRORS = 2

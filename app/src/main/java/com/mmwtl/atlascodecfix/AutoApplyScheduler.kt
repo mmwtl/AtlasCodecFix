@@ -45,6 +45,17 @@ object AutoApplyScheduler {
         return scheduled
     }
 
+    fun ensureScheduled(context: Context): Boolean {
+        val app = context.applicationContext as CodecFixApp
+        if (!app.prefs.autoApplyCodecFix || !app.prefs.adbEnabled) {
+            cancel(context)
+            return true
+        }
+
+        val scheduler = context.getSystemService(JobScheduler::class.java)
+        return scheduler.getPendingJob(JOB_ID) != null || schedule(context)
+    }
+
     fun cancel(context: Context) {
         context.getSystemService(JobScheduler::class.java).cancel(JOB_ID)
         val app = context.applicationContext as CodecFixApp

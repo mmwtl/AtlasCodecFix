@@ -33,11 +33,10 @@ class HevcCodecFixRepositoryTest {
         assertEquals(0, assets.stageCount.get())
         assertEquals(2, adb.commands.size)
         val restoreCommand = adb.commands.first()
-        assertTrue(restoreCommand.startsWith("su root sh -c "))
+        assertAdaptiveRootShell(restoreCommand)
         assertTrue(restoreCommand.contains(FakeAssets.RESTORE_MARKER))
         assertTrue(restoreCommand.contains("/dev/hevc/.standalone/"))
         assertTrue(restoreCommand.contains("cp "))
-        assertEquals(1, Regex("""\bsh -c\b""").findAll(restoreCommand).count())
         assertFalse(adb.commands.any { it.contains(FakeAssets.PREFLIGHT_MARKER) })
     }
 
@@ -120,8 +119,7 @@ class HevcCodecFixRepositoryTest {
 
         assertTrue(result.commandSuccess)
         val command = adb.commands.single()
-        assertTrue(command.startsWith("su root sh -c "))
-        assertEquals(1, Regex("""\bsh -c\b""").findAll(command).count())
+        assertAdaptiveRootShell(command)
         assertFalse(command.contains("/dev/hevc.operation.lock"))
     }
 
@@ -138,7 +136,7 @@ class HevcCodecFixRepositoryTest {
 
         assertTrue(result.success)
         val applyCommand = adb.commands.first { it.contains("NEW_DIR=") }
-        assertTrue(applyCommand.startsWith("su root sh -c "))
+        assertAdaptiveRootShell(applyCommand)
         assertTrue(applyCommand.contains("/dev/hevc"))
     }
 
@@ -171,7 +169,7 @@ class HevcCodecFixRepositoryTest {
         )
 
         val applyCommand = adb.commands.first { it.contains("NEW_DIR=") }
-        assertTrue(applyCommand.startsWith("su root sh -c "))
+        assertAdaptiveRootShell(applyCommand)
         assertFalse(applyCommand.contains("/dev/hevc.operation.lock"))
         assertTrue(applyCommand.contains("phase:verify_variant"))
         assertTrue(applyCommand.contains("phase:automatic_restore"))
@@ -229,10 +227,7 @@ class HevcCodecFixRepositoryTest {
 
         assertTrue(result.commandSuccess)
         assertEquals(3, adb.commands.size)
-        assertTrue(adb.commands.all { it.startsWith("su root sh -c ") })
-        assertTrue(adb.commands.all { command ->
-            Regex("""\bsh -c\b""").findAll(command).count() == 1
-        })
+        adb.commands.forEach(::assertAdaptiveRootShell)
         assertTrue(adb.commands.none { it.contains("/dev/hevc.operation.lock") })
         assertTrue(adb.commands.none { it.contains("mount ") || it.contains("umount") })
         assertTrue(result.output.contains("atlas_diagnostics:2"))
@@ -251,7 +246,7 @@ class HevcCodecFixRepositoryTest {
         assertTrue(result.commandSuccess)
         assertEquals("/sdcard/Download/ACF/20260814_120000", result.exportPath)
         val command = adb.commands.single()
-        assertTrue(command.startsWith("su root sh -c "))
+        assertAdaptiveRootShell(command)
         assertTrue(command.contains("/sdcard/Download/ACF"))
         assertTrue(command.contains("media_codecs*.xml"))
         assertTrue(command.contains("media_profiles*.xml"))
@@ -305,6 +300,13 @@ class HevcCodecFixRepositoryTest {
             it.contains("NEW_DIR=") || it.contains(FakeAssets.RESTORE_MARKER)
         })
         assertEquals(0, assets.stageCount.get())
+    }
+
+    private fun assertAdaptiveRootShell(command: String) {
+        assertTrue(command.startsWith("ROOT_PREFIX='su root'; "))
+        assertTrue(command.contains("id -u 2>/dev/null"))
+        assertTrue(command.contains("ROOT_PREFIX='';"))
+        assertEquals(1, Regex("""\bsh -c\b""").findAll(command).count())
     }
 
     private class FakeAssets(

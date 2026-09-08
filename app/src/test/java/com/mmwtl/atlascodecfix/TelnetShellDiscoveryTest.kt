@@ -29,6 +29,7 @@ class TelnetShellDiscoveryTest {
         assertTrue(connectedTransport === transport)
         assertTrue(transport.lastCommand.orEmpty().startsWith("printf "))
         assertFalse(transport.lastCommand.orEmpty().contains("pm path"))
+        assertEquals(5_000L, transport.lastTimeoutMs)
     }
 
     @Test
@@ -71,16 +72,45 @@ class TelnetShellDiscoveryTest {
         assertTrue(failure.message.orEmpty().contains("local ports checked"))
     }
 
+    @Test
+    fun timedOutDiscoveryContinuesFromAnotherPortOnRetry() {
+        var nowNanos = 0L
+        val attemptedPorts = mutableListOf<Int>()
+        val discovery = TelnetShellDiscovery(
+            markerFactory = { "__MARKER__:" },
+            portSource = TelnetPortSource { host ->
+                if (host == "127.0.0.1") listOf(30_003, 30_002, 30_001) else emptyList()
+            },
+            connector = { _, port ->
+                attemptedPorts += port
+                FakeTransport(
+                    probeOutput = "not a shell",
+                    afterExec = { nowNanos += 2_000_000L }
+                )
+            },
+            nanoTime = { nowNanos }
+        )
+
+        assertThrows(IOException::class.java) { discovery.open(timeoutMs = 1L) }
+        assertThrows(IOException::class.java) { discovery.open(timeoutMs = 1L) }
+
+        assertEquals(listOf(30_003, 30_002), attemptedPorts)
+    }
+
     private class FakeTransport(
-        private val probeOutput: String = "__ATLAS_TELNET_SHELL__"
+        private val probeOutput: String = "__ATLAS_TELNET_SHELL__",
+        private val afterExec: () -> Unit = {}
     ) : TelnetCommandTransport {
         var lastCommand: String? = null
+        var lastTimeoutMs: Long? = null
         var closed = false
 
         override fun isClosed(): Boolean = closed
 
         override fun exec(command: String, marker: String, timeoutMs: Long): Pair<String, Int> {
             lastCommand = command
+            lastTimeoutMs = timeoutMs
+            afterExec()
             return probeOutput to 0
         }
 

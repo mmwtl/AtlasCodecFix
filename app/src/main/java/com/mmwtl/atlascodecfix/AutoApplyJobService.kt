@@ -15,25 +15,34 @@ class AutoApplyJobService : JobService() {
     // Keep completion and retry accounting serialized with JobService lifecycle callbacks.
     // The client and repository move their blocking operations to Dispatchers.IO themselves.
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val runGuard = AutoApplyRunGuard()
     private var runningJob: Job? = null
 
     override fun onStartJob(params: JobParameters): Boolean {
+        val runToken = runGuard.start()
         runningJob?.cancel()
         runningJob = scope.launch {
             val shouldRetry = try {
-                performAutoApply()
+                performAutoApply(runToken)
             } catch (t: CancellationException) {
                 throw t
             } catch (t: Throwable) {
                 Log.e(TAG, "Auto apply job failed", t)
-                retryOrStop(t.message ?: t.javaClass.simpleName)
+                if (runGuard.isCurrent(runToken)) {
+                    retryOrStop(t.message ?: t.javaClass.simpleName)
+                } else {
+                    false
+                }
             }
-            jobFinished(params, shouldRetry)
+            if (runGuard.isCurrent(runToken)) {
+                jobFinished(params, shouldRetry)
+            }
         }
         return true
     }
 
     override fun onStopJob(params: JobParameters): Boolean {
+        runGuard.invalidate()
         runningJob?.cancel()
         runningJob = null
         val prefs = currentApp().prefs
@@ -52,11 +61,12 @@ class AutoApplyJobService : JobService() {
     }
 
     override fun onDestroy() {
+        runGuard.invalidate()
         scope.cancel()
         super.onDestroy()
     }
 
-    private suspend fun performAutoApply(): Boolean {
+    private suspend fun performAutoApply(runToken: Long): Boolean {
         val app = currentApp()
         val prefs = app.prefs
         if (!prefs.autoApplyCodecFix || !prefs.adbEnabled) {
@@ -65,6 +75,7 @@ class AutoApplyJobService : JobService() {
         }
 
         if (!app.adbClient.connectForAutoApply()) {
+            if (!runGuard.isCurrent(runToken)) return false
             val message = (app.adbClient.connectionState.value as? AdbConnectionState.Error)
                 ?.message
                 ?: getString(R.string.auto_apply_connect_failed)
@@ -78,6 +89,7 @@ class AutoApplyJobService : JobService() {
                 skipCompatibilityCheck = prefs.skipCompatibilityCheck
             )
         )
+        if (!runGuard.isCurrent(runToken)) return false
         if (result.success) {
             prefs.autoApplyRetryCount = 0
             Log.i(

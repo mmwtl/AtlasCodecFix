@@ -49,6 +49,9 @@ class CodecFixViewModel(
         app.prefs.adbEnabled = enabled
         _state.update { it.copy(adbEnabled = enabled) }
         if (enabled) {
+            if (app.prefs.autoApplyCodecFix) {
+                AutoApplyScheduler.schedule(app, resetRetries = true)
+            }
             connectAdb()
         } else {
             AutoApplyScheduler.cancel(app)
@@ -218,15 +221,28 @@ class CodecFixViewModel(
 
             app.prefs.autoApplyCodecFix = enabled
             app.prefs.autoApplyRetryCount = 0
-            if (!enabled) cancelAutoApplyIfUnused()
+            val scheduled = if (enabled) {
+                AutoApplyScheduler.schedule(app, resetRetries = true)
+            } else {
+                cancelAutoApplyIfUnused()
+                true
+            }
             _state.update {
                 it.copy(
                     autoApplyCodecFix = enabled,
-                    status = if (enabled) {
+                    status = if (enabled && scheduled) {
                         text(R.string.auto_enabled_for, it.effectiveAutoApplyVariant.title)
+                    } else if (enabled) {
+                        text(R.string.auto_apply_schedule_failed)
                     } else {
                         text(R.string.auto_codecfix_disabled)
                     }
+                )
+            }
+            if (enabled && !scheduled) {
+                notifyError(
+                    text(R.string.app_name),
+                    text(R.string.auto_apply_schedule_failed)
                 )
             }
         }
