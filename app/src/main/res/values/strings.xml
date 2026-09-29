@@ -11,6 +11,17 @@
     <string name="variant_ultra_description">Максимальный C2/QTI-first набор — экспериментально</string>
     <string name="experimental_profiles_separator">Экспериментальные профили</string>
 
+    <string name="tab_profile">Профиль</string>
+    <string name="tab_connection">Подключение</string>
+    <string name="tab_autostart">Автозапуск</string>
+    <string name="tab_diagnostics">Диагностика</string>
+    <string name="status_show_more">Подробнее</string>
+    <string name="status_show_less">Свернуть</string>
+    <string name="status_busy">Выполняется операция</string>
+    <string name="profile_hint_adb_disabled">ADB helper выключен — применение недоступно</string>
+    <string name="profile_hint_adb_not_connected">ADB не подключён</string>
+    <string name="action_open_connection">Подключение</string>
+
     <string name="section_adb">ADB подключение</string>
     <string name="adb_helper">ADB helper</string>
     <string name="adb_helper_description">Подключение к локальному adbd</string>
@@ -38,12 +49,13 @@
     <string name="auto_codecfix">Codecfix после загрузки</string>
     <string name="selected_auto_variant">Будет использован выбранный вариант: %1$s</string>
     <string name="auto_apply_delay">Задержка после загрузки, секунд</string>
-    <string name="auto_apply_delay_description">От 0 до 3600 секунд; применяется при следующей загрузке системы</string>
+    <string name="auto_apply_delay_description">0–3600 с, действует со следующей загрузки</string>
     <string name="auto_apply_delay_invalid">Введите число от 0 до 3600</string>
     <string name="unsafe_mode">Небезопасный режим</string>
-    <string name="unsafe_mode_description">Пропустить preflight и разрешить автоприменение экспериментальных профилей</string>
+    <string name="unsafe_mode_description">Пропускает preflight и подтверждение риска при ручном и автоматическом применении, разрешает автоприменение экспериментальных профилей</string>
+    <string name="section_danger_zone">Опасная зона</string>
 
-    <string name="section_errors">Ошибки</string>
+    <string name="section_notifications">Уведомления</string>
     <string name="error_notifications">Уведомления об ошибках</string>
     <string name="error_notifications_description">Показывать ошибки ADB, preflight и применения</string>
 
@@ -81,7 +93,7 @@
     <string name="auto_apply_schedule_failed">Не удалось запланировать автоприменение</string>
     <string name="auto_apply_accessibility_label">Надёжный автозапуск Codec Fix</string>
     <string name="auto_apply_accessibility_description">Запускает проверку выбранного codec-профиля после загрузки и пробуждения ГУ. Не читает содержимое окон и не выполняет жесты.</string>
-    <string name="auto_apply_accessibility_hint">Для резервного запуска включите «Надёжный автозапуск Codec Fix» в специальных возможностях.</string>
+    <string name="auto_apply_accessibility_hint">Резервный запуск: включите «Надёжный автозапуск Codec Fix» в спецвозможностях.</string>
     <string name="open_accessibility_settings">Открыть специальные возможности</string>
     <string name="no_accessibility_settings">В прошивке нет системного экрана специальных возможностей</string>
     <string name="unsafe_disabled_auto_disabled">Небезопасный режим выключен; автоприменение экспериментального профиля отключено</string>
@@ -107,7 +119,13 @@
     <string name="compatibility_not_confirmed">Совместимость устройства не подтверждена</string>
     <string name="experimental_confirmation_required">Экспериментальный профиль %1$s требует явного подтверждения</string>
 
+    <string name="section_device_checks">Проверка устройства</string>
+    <string name="device_checks_description">Отчёт появится в шапке; конфигурация кодеков не меняется</string>
+
     <string name="section_codecs">Доступные кодеки</string>
+    <string name="codec_filters">Фильтры</string>
+    <string name="codec_filters_show">Показать фильтры</string>
+    <string name="codec_filters_hide">Скрыть фильтры</string>
     <string name="collecting_codecs">Собираю список кодеков</string>
     <string name="collecting_short">Собираю список</string>
     <string name="show_codecs">Посмотреть кодеки</string>
